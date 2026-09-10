@@ -52,6 +52,7 @@ final class GitHub_Release_Updater {
 				'cache_hours'   => 12,
 				'failure_hours' => 1,
 				'timeout'       => 5,
+				'include_prereleases' => false,
 			)
 		);
 
@@ -60,7 +61,8 @@ final class GitHub_Release_Updater {
 		}
 
 		$this->cache_key = 'cniworks_gh_release_' . md5(
-			strtolower( $this->config['owner'] . '/' . $this->config['repository'] )
+			strtolower( $this->config['owner'] . '/' . $this->config['repository'] ) .
+			( $this->config['include_prereleases'] ? '|beta' : '' )
 		);
 
 		add_action( 'load-update-core.php', array( $this, 'maybe_clear_cache_for_forced_check' ), 5 );
@@ -141,7 +143,11 @@ final class GitHub_Release_Updater {
 			}
 		}
 
-		if ( ! $this->is_semantic_version( $this->config['version'] ) || ! is_string( $this->config['update_uri'] ) ) {
+		if (
+			! $this->is_semantic_version( $this->config['version'] ) ||
+			! is_string( $this->config['update_uri'] ) ||
+			! is_bool( $this->config['include_prereleases'] )
+		) {
 			return false;
 		}
 
@@ -227,15 +233,17 @@ final class GitHub_Release_Updater {
 	}
 
 	/**
-	 * Fetches and validates GitHub's latest published release.
+	 * Fetches and validates GitHub's latest release for the configured channel.
 	 *
 	 * @return array<string, string>|null
 	 */
 	private function request_release() {
-		$endpoint = sprintf(
-			'https://api.github.com/repos/%s/%s/releases/latest',
+		$endpoint_path = $this->config['include_prereleases'] ? 'releases?per_page=20' : 'releases/latest';
+		$endpoint      = sprintf(
+			'https://api.github.com/repos/%s/%s/%s',
 			rawurlencode( $this->config['owner'] ),
-			rawurlencode( $this->config['repository'] )
+			rawurlencode( $this->config['repository'] ),
+			$endpoint_path
 		);
 		$response = wp_safe_remote_get(
 			$endpoint,
@@ -259,16 +267,44 @@ final class GitHub_Release_Updater {
 			return null;
 		}
 
-		if ( ! empty( $body['draft'] ) || ! empty( $body['prerelease'] ) || ! isset( $body['tag_name'] ) || ! is_string( $body['tag_name'] ) ) {
+		$candidates = $this->config['include_prereleases'] ? $body : array( $body );
+		$latest     = null;
+		foreach ( $candidates as $candidate ) {
+			$release = $this->validate_release( $candidate );
+			if ( null !== $release && ( null === $latest || version_compare( $release['version'], $latest['version'], '>' ) ) ) {
+				$latest = $release;
+			}
+		}
+
+		return $latest;
+	}
+
+	/**
+	 * Validates one GitHub Release and its dedicated ZIP asset.
+	 *
+	 * @param mixed $body Decoded GitHub Release payload.
+	 * @return array<string, string>|null
+	 */
+	private function validate_release( $body ) {
+		if ( ! is_array( $body ) || ! empty( $body['draft'] ) || ! isset( $body['tag_name'] ) || ! is_string( $body['tag_name'] ) ) {
+			return null;
+		}
+
+		$is_prerelease = ! empty( $body['prerelease'] );
+		if ( $is_prerelease && ! $this->config['include_prereleases'] ) {
 			return null;
 		}
 
 		$tag_match = array();
-		if ( ! preg_match( '/^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/', $body['tag_name'], $tag_match ) ) {
+		if ( ! preg_match( '/^v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$/', $body['tag_name'], $tag_match ) ) {
 			return null;
 		}
 
-		$release_version   = $tag_match[1] . '.' . $tag_match[2] . '.' . $tag_match[3];
+		$release_version = $tag_match[1];
+		if ( $is_prerelease !== str_contains( $release_version, '-' ) ) {
+			return null;
+		}
+
 		$expected_filename = $this->config['slug'] . '-' . $release_version . '.zip';
 		$matching_assets   = array();
 		if ( empty( $body['assets'] ) || ! is_array( $body['assets'] ) ) {
@@ -389,14 +425,14 @@ final class GitHub_Release_Updater {
 	}
 
 	/**
-	 * Validates the supported stable X.Y.Z format.
+	 * Validates supported stable and prerelease semantic versions.
 	 *
 	 * @param mixed $version Version to validate.
 	 * @return bool
 	 */
 	private function is_semantic_version( $version ) {
 		return is_string( $version ) &&
-			1 === preg_match( '/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/', $version );
+			1 === preg_match( '/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/', $version );
 	}
 
 	/**

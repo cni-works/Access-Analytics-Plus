@@ -87,7 +87,7 @@
 
 	var items = [
 	  { key: 'visitors', label: compact ? '訪問者' : '訪問者数', suffix: '人', help: 'この期間に訪れたブラウザーの数です。' },
-      { key: 'pageviews', label: 'PV', suffix: '' },
+      { key: 'pageviews', label: compact ? 'PV' : '閲覧回数（PV）', suffix: '' },
 	  { key: 'average_engaged_seconds', label: '平均閲覧時間', format: 'duration', compare: 'duration', zeroIsData: true, help: 'ページが画面に表示されていた有効時間を、終了した訪問ごとに平均した概算値です。' },
 	  { key: 'bounce_rate', label: '直帰率', format: 'percent', compare: 'points', zeroIsData: true, lowerIsBetter: true, help: '1ページだけ見て終了した訪問の割合です。現在閲覧中の訪問は含みません。' },
 	  { key: 'pages_per_visit', label: '1訪問あたりPV', format: 'pages', compare: 'pages', help: '1回の訪問で平均何ページ見られたかを表します。' }
@@ -97,7 +97,7 @@
     items.forEach(function (item) {
       var metric = metrics[item.key];
       var card = document.createElement('div');
-      card.className = 'aap-metric-card';
+      card.className = 'aap-metric-card' + (!compact && ['visitors', 'pageviews'].includes(item.key) ? ' is-primary' : '');
 
       var label = document.createElement('span');
       label.className = 'aap-metric-label';
@@ -115,6 +115,14 @@
       var value = document.createElement('strong');
       value.className = 'aap-metric-value';
       value.textContent = metricValue(metric, item);
+      if (!compact && metric.value !== null && (item.suffix || item.format === 'pages' || item.format === 'percent')) {
+        var unit = item.suffix || (item.format === 'pages' ? 'ページ' : '%');
+        value.textContent = value.textContent.slice(0, -unit.length);
+        var unitLabel = document.createElement('span');
+        unitLabel.className = 'aap-metric-unit';
+        unitLabel.textContent = unit;
+        value.appendChild(unitLabel);
+      }
 
       var comparison = document.createElement('span');
       comparison.className = 'aap-change ' + comparisonClass(metric, item);
@@ -158,26 +166,49 @@
 	return String(row.label).replace(/時$/, ':00');
   }
 
+  function highlightTime(container, date) {
+    container.querySelectorAll('[data-aap-time]').forEach(function (node) {
+      node.classList.toggle('is-highlighted', node.dataset.aapTime === date);
+    });
+  }
+
   function renderChart(container, rows, compact) {
     var target = container.querySelector('[data-aap-chart]');
     if (!target) return;
+    target.aapChartRows = rows;
+    target.aapChartWidth = Math.round(target.clientWidth);
+    if (!compact && window.ResizeObserver && !target.aapResizeObserver) {
+      target.aapResizeObserver = new ResizeObserver(function () {
+        if (Math.round(target.clientWidth) !== target.aapChartWidth) renderChart(container, target.aapChartRows, false);
+      });
+      target.aapResizeObserver.observe(target);
+    }
     clear(target);
 	target.className = 'aap-chart-wrap';
 	delete target.dataset.tooltipPinned;
 
-    var values = rows.map(function (row) { return row.visitors; });
+    if (!rows.some(function (row) { return row.visitors > 0 || row.pageviews > 0; })) {
+      var empty = document.createElement('p');
+      empty.className = 'aap-chart-empty';
+      empty.textContent = 'この期間に記録されたアクセスはありません。別の期間も確認できます。';
+      target.appendChild(empty);
+      return;
+    }
+
+    var values = rows.map(function (row) { return compact ? row.visitors : Math.max(row.visitors, row.pageviews); });
 	var scale = niceScale(Math.max.apply(Math, values.concat([0])));
-    var width = compact ? 520 : 840;
+    var width = compact ? 520 : Math.max(320, Math.min(840, target.clientWidth || 840));
 	var height = compact ? 120 : 250;
     var padLeft = compact ? 8 : 52;
 	var padRight = compact ? 8 : 24;
 	var padTop = compact ? 12 : 28;
-	var padBottom = compact ? 12 : 34;
+	var padBottom = compact ? 26 : 34;
     var usableWidth = width - padLeft - padRight;
     var usableHeight = height - padTop - padBottom;
 	var dailySeries = isDailyRows(rows);
+	var slotWidth = usableWidth / Math.max(1, rows.length);
 	var points = rows.map(function (row, index) {
-      var x = rows.length === 1 ? width / 2 : padLeft + (index / (rows.length - 1)) * usableWidth;
+      var x = padLeft + (index + .5) * slotWidth;
       var y = padTop + usableHeight - (row.visitors / scale.maximum) * usableHeight;
       return { x: x, y: y, row: row };
     });
@@ -186,7 +217,22 @@
     var svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', '訪問者数の推移。縦軸は訪問者数です。');
+    svg.setAttribute('aria-label', compact ? '訪問者数の推移。縦軸は訪問者数です。' : '訪問者数と閲覧回数の推移。青は訪問者数（人）、薄い青は閲覧回数（PV）。両方ともゼロ基準で重ねています。');
+    if (!compact) {
+      var legend = document.createElement('div');
+      legend.className = 'aap-chart-legend';
+      [['visitors', '濃い青：訪問者数（人）'], ['pageviews', '薄い青：閲覧回数（PV）']].forEach(function (entry) {
+        var label = document.createElement('span');
+        label.className = 'is-' + entry[0];
+        label.textContent = entry[1];
+        legend.appendChild(label);
+      });
+      var note = document.createElement('span');
+      note.className = 'aap-chart-legend-note';
+      note.textContent = '重ねて表示（合計ではありません）';
+      legend.appendChild(note);
+      target.appendChild(legend);
+    }
     svg.classList.add('aap-chart');
 
 	if (!compact) {
@@ -209,20 +255,7 @@
 	  }
 	}
 
-    if (points.length) {
-      var area = document.createElementNS(ns, 'path');
-      var path = 'M ' + points[0].x + ' ' + (height - padBottom) + ' L ' + points.map(function (point) {
-        return point.x + ' ' + point.y;
-      }).join(' L ') + ' L ' + points[points.length - 1].x + ' ' + (height - padBottom) + ' Z';
-      area.setAttribute('d', path);
-      area.setAttribute('class', 'aap-chart-area');
-      svg.appendChild(area);
-
-      var line = document.createElementNS(ns, 'polyline');
-      line.setAttribute('points', points.map(function (point) { return point.x + ',' + point.y; }).join(' '));
-      line.setAttribute('class', 'aap-chart-line');
-      svg.appendChild(line);
-
+	if (points.length) {
 	  var bubble = document.createElement('div');
 	  bubble.className = 'aap-chart-bubble';
 	  bubble.hidden = true;
@@ -231,6 +264,7 @@
 
       points.forEach(function (point, index) {
 		var showDetails = function (pinned) {
+		  highlightTime(container, point.row.date);
 		  clear(bubble);
 		  var heading = document.createElement('strong');
 		  heading.textContent = pointHeading(point.row, dailySeries);
@@ -247,20 +281,40 @@
 		  target.dataset.tooltipPinned = pinned ? '1' : '0';
 		};
 		var hideDetails = function () {
-		  if (target.dataset.tooltipPinned !== '1') bubble.hidden = true;
+		  if (target.dataset.tooltipPinned !== '1') {
+			bubble.hidden = true;
+			highlightTime(container, null);
+		  }
 		};
 
-		var dot = document.createElementNS(ns, 'circle');
-		dot.setAttribute('cx', point.x);
-		dot.setAttribute('cy', point.y);
-		dot.setAttribute('r', compact ? 3 : 5);
-		dot.setAttribute('class', 'aap-chart-dot' + (dailySeries && !compact ? ' is-drilldown' : ''));
-		svg.appendChild(dot);
+		var barWidth = compact ? Math.max(3, Math.min(18, slotWidth * .58)) : Math.min(44, slotWidth * .7);
+		var visitorBar = document.createElementNS(ns, 'rect');
+		visitorBar.setAttribute('class', 'aap-chart-bar');
+		visitorBar.setAttribute('data-aap-time', point.row.date);
+		visitorBar.setAttribute('x', point.x - (compact ? barWidth / 2 : barWidth * .36));
+		visitorBar.setAttribute('y', point.y);
+		visitorBar.setAttribute('width', compact ? barWidth : barWidth * .72);
+		visitorBar.setAttribute('height', height - padBottom - point.y);
+		visitorBar.setAttribute('rx', '2');
+		if (!compact) {
+		  var pvBar = document.createElementNS(ns, 'rect');
+		  var pvHeight = point.row.pageviews / scale.maximum * usableHeight;
+		  pvBar.setAttribute('class', 'aap-chart-bar is-pageviews');
+		  pvBar.setAttribute('data-aap-time', point.row.date);
+		  pvBar.setAttribute('x', point.x - barWidth / 2);
+		  pvBar.setAttribute('y', height - padBottom - pvHeight);
+		  pvBar.setAttribute('width', barWidth);
+		  pvBar.setAttribute('height', pvHeight);
+		  pvBar.setAttribute('rx', '2');
+		  svg.appendChild(pvBar);
+		}
+		svg.appendChild(visitorBar);
 
-		var hit = document.createElementNS(ns, 'circle');
-		hit.setAttribute('cx', point.x);
-		hit.setAttribute('cy', point.y);
-		hit.setAttribute('r', compact ? 10 : 13);
+		var hit = document.createElementNS(ns, 'rect');
+		hit.setAttribute('x', point.x - slotWidth / 2);
+		hit.setAttribute('y', padTop);
+		hit.setAttribute('width', slotWidth);
+		hit.setAttribute('height', usableHeight);
 		hit.setAttribute('class', 'aap-chart-hit');
 		hit.setAttribute('fill', 'transparent');
 		hit.setAttribute('stroke', 'none');
@@ -274,7 +328,7 @@
 		hit.addEventListener('click', function () {
 		  var touchInteraction = window.matchMedia && window.matchMedia('(hover: none)').matches;
 		  showDetails(touchInteraction);
-		  if (dailySeries && !compact) setDayView(container, point.row.date);
+		  if (dailySeries && !compact) drillIntoDay(container, point.row.date);
 		});
 		hit.addEventListener('keydown', function (event) {
 		  if (event.key === 'Enter' || event.key === ' ') {
@@ -284,12 +338,14 @@
 		});
 		svg.appendChild(hit);
 
-        if (!compact && (rows.length <= 10 || index % Math.ceil(rows.length / 7) === 0 || index === rows.length - 1)) {
+        var showCompactLabel = compact && (dailySeries || index === 0 || index === rows.length - 1 || index % 6 === 0);
+        var showFullLabel = !compact && (rows.length <= 10 || index % Math.ceil(rows.length / 7) === 0 || index === rows.length - 1);
+        if (showCompactLabel || showFullLabel) {
           var text = document.createElementNS(ns, 'text');
           text.setAttribute('x', point.x);
-          text.setAttribute('y', height - 9);
+          text.setAttribute('y', height - (compact ? 7 : 9));
           text.setAttribute('text-anchor', 'middle');
-          text.setAttribute('class', 'aap-chart-label');
+          text.setAttribute('class', 'aap-chart-label' + (compact ? ' is-compact' : ''));
           text.textContent = point.row.label;
           svg.appendChild(text);
         }
@@ -301,7 +357,7 @@
 
 	var helper = document.createElement('p');
 	helper.className = 'aap-chart-helper';
-	helper.textContent = compact ? (dailySeries ? '直近7日間の訪問者推移' : '時間別の訪問者推移') : (dailySeries ? 'ポイントを選ぶと、その日の時間別表示へ移動します。' : 'ポイントにマウスを重ねるかタップすると実数を確認できます。');
+	helper.textContent = compact ? (dailySeries ? '直近7日間の訪問者推移' : '時間別の訪問者推移') : (dailySeries ? '棒を選ぶと、その日の時間別表示へ移動します。' : '棒にマウスを重ねるかタップすると、人数とPVを確認できます。');
 	target.appendChild(helper);
   }
 
@@ -310,6 +366,8 @@
 	if (!target || compact) return;
 	clear(target);
 	var daily = isDailyRows(rows);
+	var disclosure = container.querySelector('[data-aap-timeseries-disclosure]');
+	if (disclosure) disclosure.querySelector('summary').textContent = daily ? '日ごとの数字・時間別への切り替え' : '時間ごとの数字';
 	var activeRows = rows.filter(function (row) { return row.visitors > 0 || row.pageviews > 0; });
 	var expanded = false;
 
@@ -351,8 +409,19 @@
 		  var item = document.createElement(daily ? 'button' : 'div');
 		  if (daily) item.type = 'button';
 		  item.className = 'aap-timeseries-row' + (row.visitors === 0 && row.pageviews === 0 ? ' is-zero' : '');
+		  item.dataset.aapTime = row.date;
+		  item.addEventListener('mouseenter', function () { highlightTime(container, row.date); });
+		  item.addEventListener('mouseleave', function () { highlightTime(container, null); });
+		  item.addEventListener('focus', function () { highlightTime(container, row.date); });
+		  item.addEventListener('blur', function () { highlightTime(container, null); });
 		  var time = document.createElement('strong');
 		  time.textContent = daily ? dateLabel.format(parseLocalDate(row.date)).replace(/^\d{4}年/, '') : String(row.label).replace(/時$/, ':00');
+		  if (daily) {
+			var action = document.createElement('span');
+			action.className = 'aap-row-action';
+			action.textContent = '時間別を見る ›';
+			time.appendChild(action);
+		  }
 		  var visitors = document.createElement('span');
 		  visitors.className = 'aap-timeseries-visitors';
 		  visitors.textContent = '訪問者 ' + number.format(row.visitors) + '人';
@@ -363,7 +432,7 @@
 		  engagement.className = 'aap-timeseries-engagement';
 		  engagement.textContent = '平均閲覧 ' + (row.average_engaged_seconds === null || typeof row.average_engaged_seconds === 'undefined' ? '集計中' : formatDuration(row.average_engaged_seconds));
 		  item.append(time, visitors, pageviews, engagement);
-		  if (daily) item.addEventListener('click', function () { setDayView(container, row.date); });
+		  if (daily) item.addEventListener('click', function () { drillIntoDay(container, row.date); });
 		  list.appendChild(item);
 		});
 		target.appendChild(list);
@@ -388,6 +457,16 @@
 		button.classList.toggle('is-active', active);
 		button.setAttribute('aria-pressed', active ? 'true' : 'false');
 	  });
+	}
+
+	function drillIntoDay(container, date) {
+	  container.aapParentPeriod = {
+		start: container.dataset.activeStart,
+		end: container.dataset.activeEnd,
+		mode: container.dataset.periodMode || '7d'
+	  };
+	  container.aapFocusPeriod = true;
+	  setDayView(container, date);
 	}
 
 	function setDayView(container, date) {
@@ -445,16 +524,103 @@
 	  setCustomPeriod(container, shiftDate(start, days * direction), shiftDate(end, days * direction), mode);
 	}
 
+	function renderCalendar(container, monthValue) {
+	  var target = container.querySelector('[data-aap-calendar]');
+	  if (!target) return;
+	  clear(target);
+	  var month = parseLocalDate(monthValue.slice(0, 7) + '-01');
+	  var monthKey = localDate(month).slice(0, 7);
+	  var expanded = !!container.aapCalendarExpanded;
+	  var anchor = container.dataset.activeEnd || todayValue();
+	  var stripEnd = shiftDate(anchor, 6 - parseLocalDate(anchor).getDay());
+	  var stripStart = shiftDate(stripEnd, -13);
+	  var header = document.createElement('div');
+	  header.className = 'aap-calendar-heading';
+	  var title = document.createElement('strong');
+	  title.textContent = month.getFullYear() + '年' + (month.getMonth() + 1) + '月';
+	  if (!expanded) title.textContent = stripStart.replace(/-/g, '/') + '〜' + stripEnd.slice(5).replace('-', '/');
+	  title.setAttribute('aria-live', 'polite');
+	  function monthButton(direction) {
+		var button = document.createElement('button');
+		button.type = 'button';
+		button.textContent = direction < 0 ? '‹ 前月' : '翌月 ›';
+		button.setAttribute('data-aap-calendar-month', String(direction));
+		button.setAttribute('aria-label', direction < 0 ? 'カレンダーの前月を表示' : 'カレンダーの翌月を表示');
+		button.disabled = direction > 0 && monthKey >= todayValue().slice(0, 7);
+		button.addEventListener('click', function () {
+		  container.aapCalendarExpanded = true;
+		  var nextMonth = localDate(new Date(month.getFullYear(), month.getMonth() + direction, 1));
+		  renderCalendar(container, nextMonth);
+		  var replacement = target.querySelector('[data-aap-calendar-month="' + direction + '"]');
+		  if (replacement.disabled) replacement = target.querySelector('[data-aap-calendar-month="-1"]');
+		  replacement.focus();
+		});
+		return button;
+	  }
+	  header.append(monthButton(-1), title, monthButton(1));
+	  target.appendChild(header);
+	  var grid = document.createElement('div');
+	  grid.className = 'aap-calendar-days';
+	  ['日', '月', '火', '水', '木', '金', '土'].forEach(function (day) {
+		var label = document.createElement('span');
+		label.className = 'aap-calendar-weekday';
+		label.textContent = day;
+		grid.appendChild(label);
+	  });
+	  if (expanded) for (var blank = 0; blank < month.getDay(); blank++) grid.appendChild(document.createElement('span'));
+	  var lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+	  for (var day = 1; day <= (expanded ? lastDay : 14); day++) {
+		var value = expanded ? monthKey + '-' + String(day).padStart(2, '0') : shiftDate(stripStart, day - 1);
+		var button = document.createElement('button');
+		button.type = 'button';
+		button.textContent = Number(value.slice(8));
+		button.dataset.aapCalendarDate = value;
+		button.disabled = value > todayValue();
+		var selected = value >= container.dataset.activeStart && value <= container.dataset.activeEnd;
+		button.classList.toggle('is-selected', selected);
+		button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+		button.setAttribute('aria-label', dateLabel.format(parseLocalDate(value)) + 'の時間別アクセスを見る');
+		if (value === todayValue()) button.setAttribute('aria-current', 'date');
+		button.addEventListener('click', function (event) {
+		  var chosen = event.currentTarget.dataset.aapCalendarDate;
+		  if (container.dataset.activeStart !== container.dataset.activeEnd) drillIntoDay(container, chosen);
+		  else {
+			container.aapFocusPeriod = true;
+			setDayView(container, chosen);
+		  }
+		});
+		grid.appendChild(button);
+	  }
+	  target.appendChild(grid);
+	  var toggle = document.createElement('button');
+	  toggle.type = 'button';
+	  toggle.className = 'aap-calendar-toggle';
+	  toggle.textContent = expanded ? '2週間表示に戻す' : '月全体から選ぶ';
+	  toggle.setAttribute('data-aap-calendar-toggle', '');
+	  toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+	  toggle.addEventListener('click', function () {
+		container.aapCalendarExpanded = !expanded;
+		renderCalendar(container, anchor);
+		target.querySelector('[data-aap-calendar-toggle]').focus();
+	  });
+	  target.appendChild(toggle);
+	  var hint = document.createElement('p');
+	  hint.textContent = '日付を押すと時間別に表示します。青色は表示中の期間、枠線は今日です。';
+	  target.appendChild(hint);
+	}
+
 	function updateDateNavigation(container, period) {
 	  var navigation = container.querySelector('[data-aap-date-navigation]');
 	  if (!navigation) return;
 	  var mode = container.dataset.periodMode || (period.start === period.end ? 'day' : container.dataset.range || 'custom');
 	  if (period.start === period.end) mode = 'day';
 	  var isSingleDay = mode === 'day' || period.start === period.end;
+	  if (!isSingleDay) container.aapParentPeriod = null;
 	  container.dataset.periodMode = mode;
 	  navigation.hidden = false;
 	  container.dataset.activeStart = period.start;
 	  container.dataset.activeEnd = period.end;
+	  renderCalendar(container, period.end);
 	  if (isSingleDay) container.dataset.activeDate = period.start;
 	  var label = navigation.querySelector('[data-aap-period-label]');
 	  var previous = navigation.querySelector('[data-aap-previous-period]');
@@ -484,6 +650,28 @@
 		returnLatest.textContent = isSingleDay ? '今日へ戻る' : '最新期間へ戻る';
 	  }
 	  if (isSingleDay) setActiveRangeButton(container, period.start === todayValue() ? 'today' : (period.start === shiftDate(todayValue(), -1) ? 'yesterday' : ''));
+	  var back = navigation.querySelector('[data-aap-back-to-period]');
+	  if (!back) {
+		back = document.createElement('button');
+		back.type = 'button';
+		back.className = 'button-link';
+		back.setAttribute('data-aap-back-to-period', '');
+		back.addEventListener('click', function () {
+		  var parent = container.aapParentPeriod;
+		  if (!parent) return;
+		  container.aapFocusPeriod = true;
+		  setCustomPeriod(container, parent.start, parent.end, parent.mode);
+		});
+		navigation.appendChild(back);
+	  }
+	  var parent = container.aapParentPeriod;
+	  back.hidden = !isSingleDay || !parent;
+	  if (parent) back.textContent = '‹ ' + parent.start.replace(/-/g, '/') + '〜' + parent.end.replace(/-/g, '/') + ' に戻る';
+	  if (container.aapFocusPeriod && label) {
+		label.setAttribute('tabindex', '-1');
+		label.focus();
+		container.aapFocusPeriod = false;
+	  }
 	}
 
   function renderBarItems(target, rows) {

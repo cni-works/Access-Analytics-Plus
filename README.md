@@ -33,7 +33,7 @@ WordPressへ配布するZIPはGitHubのSource code ZIPではなく、次のコ�
 
 ## 更新方式
 
-公開済みのGitHub Releaseから、厳密な`vX.Y.Z` Tagと同Versionの専用Release Assetだけを使用します。GitHub API障害やRelease情報不正時は更新なしとして扱い、アクセス解析本体の計測・管理画面・フロント動作を継続します。
+公開済みのGitHub Releaseから、厳密な`vX.Y.Z`または`vX.Y.Z-prerelease` Tagと同Versionの専用Release Assetだけを使用します。Pre-releaseはベータチャンネルを明示的に有効化した版だけが取得します。GitHub API障害やRelease情報不正時は更新なしとして扱い、アクセス解析本体の計測・管理画面・フロント動作を継続します。
 
 詳しくは[GitHub Updater仕様](docs/GITHUB-UPDATER.md)と[Release手順](docs/RELEASE-PROCEDURE.md)を参照してください。
 

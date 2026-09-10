@@ -121,6 +121,7 @@ function config( array $overrides = array() ): array {
 			'cache_hours'   => 12,
 			'failure_hours' => 1,
 			'timeout'       => 5,
+			'include_prereleases' => false,
 		),
 		$overrides
 	);
@@ -145,6 +146,18 @@ function release_body( string $version = '0.1.3', array $overrides = array() ): 
 				'assets'     => array( asset( $version ) ),
 			),
 			$overrides
+		),
+		JSON_THROW_ON_ERROR
+	);
+}
+
+function release_list_body( array $releases ): string {
+	return json_encode(
+		array_map(
+			static function ( string $release ): array {
+				return json_decode( $release, true, 512, JSON_THROW_ON_ERROR );
+			},
+			$releases
 		),
 		JSON_THROW_ON_ERROR
 	);
@@ -183,6 +196,34 @@ expect( 5 === $test_requests[0]['args']['timeout'], 'Timeout must be five second
 expect( 3 === $test_requests[0]['args']['redirection'], 'Redirect limit must be three.' );
 expect( '2022-11-28' === $test_requests[0]['args']['headers']['X-GitHub-Api-Version'], 'GitHub API version mismatch.' );
 expect( 'update_plugins_github.com' === $test_filters[0]['hook'], 'Dynamic Update URI filter must be registered.' );
+
+reset_state();
+$test_http = array(
+	'code' => 200,
+	'body' => release_list_body(
+		array(
+			release_body( '0.1.3' ),
+			release_body( '0.5.0-beta', array( 'prerelease' => true ) ),
+		)
+	),
+);
+$result = filter_result( array( 'include_prereleases' => true ) );
+expect( '0.5.0-beta' === $result['new_version'], 'Beta channel must select a newer validated prerelease.' );
+expect( str_ends_with( $result['package'], 'access-analytics-plus-0.5.0-beta.zip' ), 'Beta channel must select the dedicated prerelease asset.' );
+expect( 'https://api.github.com/repos/cni-works/Access-Analytics-Plus/releases?per_page=20' === $test_requests[0]['url'], 'Beta API endpoint mismatch.' );
+
+reset_state();
+$test_http = array(
+	'code' => 200,
+	'body' => release_list_body(
+		array(
+			release_body( '0.5.1-beta', array( 'prerelease' => true ) ),
+			release_body( '0.5.0-beta', array( 'prerelease' => true ) ),
+		)
+	),
+);
+$result = filter_result( array( 'version' => '0.5.0-beta', 'include_prereleases' => true ) );
+expect( '0.5.1-beta' === $result['new_version'], 'Installed beta must receive a newer beta update.' );
 
 reset_state();
 $test_http = array( 'code' => 200, 'body' => release_body( '0.1.2' ) );

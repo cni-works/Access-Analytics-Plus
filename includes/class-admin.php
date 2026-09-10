@@ -32,7 +32,7 @@ final class Admin {
 			return;
 		}
 
-		wp_enqueue_style( 'aap-admin', AAP_PLUGIN_URL . 'assets/css/admin-ui4.css', array(), AAP_VERSION . '.' . AAP_BUILD );
+		wp_enqueue_style( 'aap-admin', AAP_PLUGIN_URL . 'assets/css/admin-ui5.css', array(), AAP_VERSION . '.' . AAP_BUILD );
 		wp_add_inline_style(
 			'aap-admin',
 			'@media (max-width:782px){.aap-grid{grid-template-columns:minmax(0,1fr)!important}.aap-grid>.aap-panel{box-sizing:border-box;max-width:100%;min-width:0;overflow:hidden;width:100%}}'
@@ -46,7 +46,7 @@ final class Admin {
 			wp_enqueue_script( 'aap-qrcode', AAP_PLUGIN_URL . 'assets/vendor/qrcode.js', array(), '1.4.4', true );
 			$dependencies[] = 'aap-qrcode';
 		}
-		wp_enqueue_script( 'aap-admin', AAP_PLUGIN_URL . 'assets/js/admin-ui4.js', $dependencies, AAP_VERSION . '.' . AAP_BUILD, true );
+		wp_enqueue_script( 'aap-admin', AAP_PLUGIN_URL . 'assets/js/admin-ui5.js', $dependencies, AAP_VERSION . '.' . AAP_BUILD, true );
 		wp_localize_script(
 			'aap-admin',
 			'aapAdmin',
@@ -58,7 +58,7 @@ final class Admin {
 				'strings'        => array(
 					'loading' => __( '読み込み中…', 'access-analytics-plus' ),
 					'error'   => __( 'データを読み込めませんでした。', 'access-analytics-plus' ),
-					'empty'   => __( 'アクセス解析を開始しました。この期間にはまだアクセスがありません。', 'access-analytics-plus' ),
+					'empty'   => __( 'この期間に記録されたアクセスはありません。', 'access-analytics-plus' ),
 				),
 			)
 		);
@@ -109,25 +109,32 @@ final class Admin {
 				<button type="button" class="button button-primary" data-aap-apply-period><?php esc_html_e( 'この期間を表示', 'access-analytics-plus' ); ?></button>
 				<span class="description"><?php esc_html_e( '最大90日', 'access-analytics-plus' ); ?></span>
 			</div>
+			<div class="aap-overview"><div class="aap-overview-calendar">
+			<section class="aap-calendar" data-aap-calendar aria-label="<?php esc_attr_e( '日付を選んでアクセスを確認', 'access-analytics-plus' ); ?>"></section>
 			<div class="aap-date-navigation" data-aap-date-navigation hidden>
 				<button type="button" data-aap-previous-period aria-label="<?php esc_attr_e( '前の期間を表示', 'access-analytics-plus' ); ?>">‹</button>
 				<strong data-aap-period-label></strong>
 				<button type="button" data-aap-next-period aria-label="<?php esc_attr_e( '次の期間を表示', 'access-analytics-plus' ); ?>">›</button>
-				<div class="aap-day-picker" data-aap-day-picker><button type="button" data-aap-open-day-picker><?php esc_html_e( '日付を選ぶ', 'access-analytics-plus' ); ?></button><input type="date" max="<?php echo esc_attr( $today ); ?>" aria-label="<?php esc_attr_e( '表示する日付を選ぶ', 'access-analytics-plus' ); ?>" data-aap-day-picker-input hidden></div>
+				<div class="aap-day-picker" data-aap-day-picker><button type="button" data-aap-open-day-picker><?php esc_html_e( '日付を直接入力', 'access-analytics-plus' ); ?></button><input type="date" max="<?php echo esc_attr( $today ); ?>" aria-label="<?php esc_attr_e( '表示する日付を直接入力', 'access-analytics-plus' ); ?>" data-aap-day-picker-input hidden></div>
 				<button type="button" class="button-link" data-aap-return-latest><?php esc_html_e( '最新期間へ戻る', 'access-analytics-plus' ); ?></button>
 			</div>
 
+			</div><div class="aap-overview-metrics">
 			<div class="aap-status" data-aap-status aria-live="polite"><?php esc_html_e( '読み込み中…', 'access-analytics-plus' ); ?></div>
 			<div class="aap-metrics" data-aap-metrics></div>
 			<p class="aap-metrics-summary" data-aap-metrics-summary></p>
+			</div></div>
 
 			<section class="aap-panel aap-chart-panel">
 				<div class="aap-section-heading">
-					<h2><?php esc_html_e( 'アクセス推移', 'access-analytics-plus' ); ?></h2>
+					<h2><?php esc_html_e( '訪問者数・閲覧回数の推移', 'access-analytics-plus' ); ?></h2>
 					<span data-aap-updated></span>
 				</div>
 				<div data-aap-chart></div>
-				<div data-aap-timeseries-list></div>
+				<details class="aap-timeseries-disclosure" data-aap-timeseries-disclosure open>
+					<summary><?php esc_html_e( '日ごとの数字を見る', 'access-analytics-plus' ); ?></summary>
+					<div data-aap-timeseries-list></div>
+				</details>
 			</section>
 
 			<div class="aap-grid">

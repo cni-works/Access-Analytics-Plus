@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Access Analytics Plus
  * Description:       WordPress管理画面でアクセス状況を簡単に確認できる軽量アクセス解析プラグインです。
- * Version:           0.1.2
+ * Version:           0.5.0-beta
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            Access Analytics Plus
@@ -21,8 +21,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AAP_VERSION', '0.1.2' );
-define( 'AAP_BUILD', 'phase2-5-ui4.20260828.1' );
+define( 'AAP_VERSION', '0.5.0-beta' );
+define( 'AAP_BUILD', 'beta.20260911.1' );
 define( 'AAP_DB_VERSION', '2' );
 define( 'AAP_PLUGIN_FILE', __FILE__ );
 define( 'AAP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
@@ -57,6 +57,7 @@ if ( is_readable( $aap_updater_file ) ) {
 				'cache_hours'   => 12,
 				'failure_hours' => 1,
 				'timeout'       => 5,
+				'include_prereleases' => true,
 			)
 		);
 	} catch ( \Throwable $aap_updater_error ) {

@@ -30,8 +30,8 @@ $updateUri = $updateUriMatch.Groups[1].Value
 $stableTag = $stableTagMatch.Groups[1].Value
 if ($version -ne $stableTag) { throw "Version ($version) and Stable tag ($stableTag) do not match." }
 if ($updateUri -ne $expectedUpdateUri) { throw "Unexpected Update URI: $updateUri" }
-if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
-	throw "Version is not a stable X.Y.Z value: $version"
+if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+	throw "Version is not a supported X.Y.Z or X.Y.Z-prerelease value: $version"
 }
 
 $zipName = "$slug-$version.zip"
