@@ -34,6 +34,9 @@ final class Cron {
 	public static function cleanup(): void {
 		global $wpdb;
 
+		// The updater is throttled internally and always falls back to an existing local database.
+		GeoIP_Database::maybe_update();
+
 		$yesterday = current_datetime()->modify( '-1 day' )->format( 'Y-m-d' );
 		if ( $yesterday !== (string) get_option( 'aap_last_daily_rebuild', '' ) ) {
 			Analytics::rebuild_daily( $yesterday );
@@ -47,6 +50,21 @@ final class Cron {
 			->format( 'Y-m-d H:i:s' );
 		$threshold_date = $retention_start->format( 'Y-m-d' );
 		$tables    = Database::tables();
+
+		// Finalize unconfirmed staged requests and expire diagnostics independently after seven days.
+		Shadow_Diagnostics::finalize_pending( 5000 );
+		$shadow_threshold = gmdate( 'Y-m-d H:i:s', time() - ( Shadow_Diagnostics::RETENTION_DAYS * DAY_IN_SECONDS ) );
+		for ( $batch = 0; $batch < 5; ++$batch ) {
+			$deleted = $wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$tables['shadow_events']} WHERE recorded_at < %s LIMIT 5000",
+					$shadow_threshold
+				)
+			);
+			if ( 5000 !== $deleted ) {
+				break;
+			}
+		}
 
 		// Bounded deletes avoid a long lock on larger sites.
 		for ( $batch = 0; $batch < 5; ++$batch ) {

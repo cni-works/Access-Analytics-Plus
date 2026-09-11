@@ -6,5 +6,7 @@
 *.txt text eol=lf
 *.ps1 text eol=crlf
 *.zip binary
+*.gz binary
+*.mmdb binary
 *.jpg binary
 *.png binary

@@ -12,6 +12,10 @@ final class Settings {
 	private const OPTION_SAMPLE_ENABLED = 'aap_sample_enabled';
 	private const OPTION_SAMPLE_SCALE = 'aap_sample_scale';
 	private const OPTION_SAMPLE_SEED = 'aap_sample_seed';
+	private const OPTION_SHADOW_ENABLED = 'aap_shadow_diagnostics_enabled';
+	private const OPTION_COUNTRY_MODE = 'aap_country_mode';
+	private const OPTION_ALLOWED_COUNTRIES = 'aap_allowed_countries';
+	private const OPTION_TRUST_CLOUDFLARE = 'aap_trust_cloudflare_country';
 
 	public static function register(): void {
 		add_action( 'admin_menu', array( self::class, 'menu' ), 20 );
@@ -44,6 +48,21 @@ final class Settings {
 
 	public static function sample_seed(): int {
 		return max( 1, (int) get_option( self::OPTION_SAMPLE_SEED, 1 ) );
+	}
+
+	public static function country_mode(): string {
+		return 'allowlist' === get_option( self::OPTION_COUNTRY_MODE, 'all' ) ? 'allowlist' : 'all';
+	}
+
+	/** @return string[] */
+	public static function allowed_countries(): array {
+		$value = get_option( self::OPTION_ALLOWED_COUNTRIES, array( 'JP' ) );
+		if ( ! is_array( $value ) ) { return array( 'JP' ); }
+		return array_values( array_filter( array_unique( array_map( static fn ( $code ): string => strtoupper( sanitize_key( (string) $code ) ), $value ) ), static fn ( string $code ): bool => 1 === preg_match( '/^[A-Z]{2}$/', $code ) ) );
+	}
+
+	public static function trust_cloudflare_country(): bool {
+		return (bool) get_option( self::OPTION_TRUST_CLOUDFLARE, false );
 	}
 
 	/**
@@ -133,6 +152,15 @@ final class Settings {
 		$retention      = (int) get_option( 'aap_retention_days', 90 );
 		$retention      = in_array( $retention, array( 90, 180, 365 ), true ) ? $retention : 90;
 		$sample_scale   = self::sample_scale();
+		$shadow_enabled = Shadow_Diagnostics::enabled();
+		$shadow_summary = $shadow_enabled ? Shadow_Diagnostics::summary() : array( 'total' => 0, 'human_like' => 0, 'unconfirmed' => 0, 'suspected' => 0, 'signals' => array(), 'reasons' => array(), 'ips' => array() );
+		$country_mode = self::country_mode();
+		$allowed_countries = implode( ', ', self::allowed_countries() );
+		$geoip_status = GeoIP_Database::status();
+		$geoip_update_url = wp_nonce_url(
+			add_query_arg( 'action', 'aap_update_geoip', admin_url( 'admin-post.php' ) ),
+			'aap_update_geoip'
+		);
 		$invalid_count  = isset( $_GET['invalid_ips'] ) ? absint( $_GET['invalid_ips'] ) : 0;
 		?>
 		<div class="wrap aap-wrap aap-settings">
@@ -142,6 +170,11 @@ final class Settings {
 			<?php endif; ?>
 			<?php if ( $invalid_count > 0 ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html( sprintf( __( '正しくないIPアドレスを%d件追加しませんでした。', 'access-analytics-plus' ), $invalid_count ) ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( isset( $_GET['geoip_update'] ) && 'success' === sanitize_key( wp_unslash( (string) $_GET['geoip_update'] ) ) ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( '国判定データを更新しました。', 'access-analytics-plus' ); ?></p></div>
+			<?php elseif ( isset( $_GET['geoip_update'] ) && 'error' === sanitize_key( wp_unslash( (string) $_GET['geoip_update'] ) ) ) : ?>
+				<div class="notice notice-warning"><p><?php esc_html_e( '国判定データを更新できませんでした。既存または同梱データで国判定を継続します。', 'access-analytics-plus' ); ?></p></div>
 			<?php endif; ?>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -191,6 +224,66 @@ final class Settings {
 					<?php if ( ! $one_click_safe ) : ?><p class="aap-warning"><?php esc_html_e( 'CDNまたはプロキシ環境の可能性があるため、現在IPのワンクリック追加を停止しています。サーバー構成を確認して手動登録してください。', 'access-analytics-plus' ); ?></p><?php endif; ?>
 				</section>
 
+				<section class="aap-settings-card">
+					<h2><?php esc_html_e( 'アクセス地域の集計', 'access-analytics-plus' ); ?></h2>
+					<label><input type="radio" name="country_mode" value="all" <?php checked( $country_mode, 'all' ); ?>> <?php esc_html_e( 'すべての地域を集計', 'access-analytics-plus' ); ?></label><br>
+					<label><input type="radio" name="country_mode" value="allowlist" <?php checked( $country_mode, 'allowlist' ); ?>> <?php esc_html_e( '指定した国のみ通常集計', 'access-analytics-plus' ); ?></label>
+					<label class="aap-setting-field"><span><?php esc_html_e( '許可する国コード', 'access-analytics-plus' ); ?></span><input type="text" name="allowed_countries" value="<?php echo esc_attr( $allowed_countries ); ?>" placeholder="JP"><small><?php esc_html_e( 'ISO 2文字コードをカンマ区切りで入力します（例：JP, US）。国を判定できないアクセスは除外しません。', 'access-analytics-plus' ); ?></small></label>
+					<label class="aap-setting-toggle"><input type="checkbox" name="trust_cloudflare_country" value="1" <?php checked( self::trust_cloudflare_country() ); ?>> <span><strong><?php esc_html_e( 'Cloudflareの国コードを信頼する', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( 'このサイトがCloudflare経由でのみ公開されている場合に有効にしてください。偽装ヘッダーを避けるため初期状態はOFFです。', 'access-analytics-plus' ); ?></small></span></label>
+					<p class="description"><?php echo esc_html( sprintf( __( '現在の判定元：%s', 'access-analytics-plus' ), Country_Resolver::source_label() ) ); ?></p>
+					<div class="aap-geoip-status">
+						<h3><?php esc_html_e( 'ローカル国判定データ', 'access-analytics-plus' ); ?></h3>
+						<dl>
+							<div><dt><?php esc_html_e( 'データソース', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $geoip_status['source'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( 'データ版', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $geoip_status['edition'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( '最終更新', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $geoip_status['last_updated'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( '状態', 'access-analytics-plus' ); ?></dt><dd class="is-<?php echo esc_attr( $geoip_status['status_level'] ); ?>"><?php echo esc_html( $geoip_status['status'] ); ?></dd></div>
+						</dl>
+						<a class="button button-secondary" href="<?php echo esc_url( $geoip_update_url ); ?>"><?php esc_html_e( '今すぐ更新', 'access-analytics-plus' ); ?></a>
+						<p class="description"><?php esc_html_e( 'DB-IP Country Liteを利用しています。データベースはCC BY 4.0で提供され、IPから国コードだけを判定します。生のIPアドレスは解析データとして保存しません。', 'access-analytics-plus' ); ?> <a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">DB-IP</a> / <a href="<?php echo esc_url( GeoIP_Database::LICENSE_URL ); ?>" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></p>
+					</div>
+				</section>
+
+				<details class="aap-settings-card aap-shadow-diagnostics">
+					<summary><?php esc_html_e( '自動アクセス診断（直近7日）', 'access-analytics-plus' ); ?></summary>
+					<p class="description"><?php esc_html_e( '新しいアクセスは、3秒の表示または操作・閲覧時間送信を確認してから通常集計へ反映します。匿名化した診断情報は7日後に削除します。', 'access-analytics-plus' ); ?></p>
+					<?php if ( $shadow_enabled ) : ?>
+						<div class="aap-shadow-summary">
+							<div><span><?php esc_html_e( '診断対象アクセス', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['total'] ) ); ?></strong></div>
+							<div><span><?php esc_html_e( '人間らしい挙動あり', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['human_like'] ) ); ?></strong></div>
+							<div><span><?php esc_html_e( '未確認', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['unconfirmed'] ) ); ?></strong></div>
+							<div><span><?php esc_html_e( 'Bot疑い', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['suspected'] ) ); ?></strong></div>
+							<div><span><?php esc_html_e( '地域設定による対象外', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['geo_excluded'] ?? 0 ) ); ?></strong></div>
+						</div>
+						<p class="description"><?php esc_html_e( '記録直後の判定待ちは「未確認」に含まれます。確認済みだけを通常のPV・訪問者として集計し、既存データは変更しません。', 'access-analytics-plus' ); ?></p>
+						<?php if ( $shadow_summary['total'] > 0 ) : ?>
+							<h3><?php esc_html_e( '確認できた診断信号', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<li><span><?php esc_html_e( '3秒の表示確認', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['visible'] ) ); ?></strong></li>
+								<li><span><?php esc_html_e( '操作あり', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['interaction'] ) ); ?></strong></li>
+								<li><span><?php esc_html_e( '閲覧時間の送信あり', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['engagement'] ) ); ?></strong></li>
+								<li><span><?php esc_html_e( 'webdriver申告あり', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['webdriver'] ) ); ?></strong></li>
+								<li><span><?php esc_html_e( 'Origin情報なし', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['origin_missing'] ) ); ?></strong></li>
+								<li><span><?php esc_html_e( '端末情報の矛盾', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['signals']['device_mismatch'] ) ); ?></strong></li>
+							</ul>
+						<?php endif; ?>
+						<?php if ( $shadow_summary['reasons'] ) : ?>
+							<h3><?php esc_html_e( 'Bot疑いとなった主な理由', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<?php foreach ( $shadow_summary['reasons'] as $reason ) : ?><li><span><?php echo esc_html( $reason['label'] ); ?></span><strong><?php echo esc_html( number_format_i18n( $reason['value'] ) ); ?></strong></li><?php endforeach; ?>
+							</ul>
+						<?php endif; ?>
+						<?php if ( $shadow_summary['ips'] ) : ?>
+							<h3><?php esc_html_e( 'アクセスが多い匿名IP識別子', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<?php foreach ( $shadow_summary['ips'] as $ip_row ) : ?><li><span><?php echo esc_html( sprintf( __( '匿名IP %s', 'access-analytics-plus' ), $ip_row['key'] ) ); ?></span><strong><?php echo esc_html( sprintf( __( '%1$sアクセス / %2$s visitor ID / 表示%3$s / 閲覧送信%4$s / webdriver%5$s / Bot疑い%6$s', 'access-analytics-plus' ), number_format_i18n( $ip_row['total'] ), number_format_i18n( $ip_row['visitors'] ), number_format_i18n( $ip_row['visible'] ), number_format_i18n( $ip_row['engagement'] ), number_format_i18n( $ip_row['webdriver'] ), number_format_i18n( $ip_row['suspected'] ) ) ); ?></strong></li><?php endforeach; ?>
+							</ul>
+						<?php endif; ?>
+					<?php else : ?>
+						<p class="description"><?php esc_html_e( '診断は停止中です。既存の通常アクセス計測は継続します。', 'access-analytics-plus' ); ?></p>
+					<?php endif; ?>
+				</details>
+
 				<details class="aap-settings-card aap-advanced-settings">
 					<summary><?php esc_html_e( '詳細設定', 'access-analytics-plus' ); ?></summary>
 					<label class="aap-setting-toggle"><input type="checkbox" name="delete_on_uninstall" value="1" <?php checked( (bool) get_option( 'aap_delete_data_on_uninstall', false ) ); ?>> <span><strong><?php esc_html_e( 'プラグイン削除時に解析データも削除する', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '通常はOFFを推奨します。削除したデータは元に戻せません。', 'access-analytics-plus' ); ?></small></span></label>
@@ -220,6 +313,13 @@ final class Settings {
 		$retention = isset( $_POST['retention_days'] ) ? absint( $_POST['retention_days'] ) : 90;
 		update_option( 'aap_retention_days', in_array( $retention, array( 90, 180, 365 ), true ) ? $retention : 90, false );
 		update_option( 'aap_delete_data_on_uninstall', isset( $_POST['delete_on_uninstall'] ) ? 1 : 0, false );
+		update_option( self::OPTION_SHADOW_ENABLED, 1, false );
+		$country_mode = isset( $_POST['country_mode'] ) ? sanitize_key( wp_unslash( (string) $_POST['country_mode'] ) ) : 'all';
+		update_option( self::OPTION_COUNTRY_MODE, 'allowlist' === $country_mode ? 'allowlist' : 'all', false );
+		$country_raw = isset( $_POST['allowed_countries'] ) ? substr( sanitize_text_field( wp_unslash( (string) $_POST['allowed_countries'] ) ), 0, 200 ) : 'JP';
+		$country_codes = array_values( array_filter( array_unique( array_map( static fn ( string $code ): string => strtoupper( trim( $code ) ), preg_split( '/[\s,]+/', $country_raw ) ?: array() ) ), static fn ( string $code ): bool => 1 === preg_match( '/^[A-Z]{2}$/', $code ) ) );
+		update_option( self::OPTION_ALLOWED_COUNTRIES, array_slice( $country_codes ?: array( 'JP' ), 0, 20 ), false );
+		update_option( self::OPTION_TRUST_CLOUDFLARE, isset( $_POST['trust_cloudflare_country'] ) ? 1 : 0, false );
 		update_option( self::OPTION_SAMPLE_ENABLED, isset( $_POST['sample_enabled'] ) ? 1 : 0, false );
 		$sample_scale = isset( $_POST['sample_scale'] ) ? sanitize_key( wp_unslash( (string) $_POST['sample_scale'] ) ) : 'standard';
 		update_option( self::OPTION_SAMPLE_SCALE, in_array( $sample_scale, array( 'low', 'standard', 'high' ), true ) ? $sample_scale : 'standard', false );

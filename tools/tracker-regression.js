@@ -18,7 +18,7 @@ function environment() {
     title: 'Test',
     referrer: '',
     visibilityState: 'visible',
-    addEventListener(name, callback) { events[name] = callback; },
+    addEventListener(name, callback) { (events[name] ||= []).push(callback); },
     get cookie() {
       return Array.from(shared.cookies, ([key, value]) => `${key}=${encodeURIComponent(value)}`).join('; ');
     },
@@ -34,6 +34,8 @@ function environment() {
       aapTracker: {
         endpoint: '/collect',
         engagementEndpoint: '/engagement',
+        shadowEndpoint: '/shadow-signal',
+        shadowVisibleSeconds: 3,
         sessionTimeout: 1800,
         engagementMaxSeconds: 1800,
         engagementIdleSeconds: 300
@@ -44,7 +46,7 @@ function environment() {
         getItem(key) { return shared.storage.get(key) || null; },
         setItem(key, value) { shared.storage.set(key, value); }
       },
-      addEventListener(name, callback) { windowEvents[name] = callback; },
+      addEventListener(name, callback) { (windowEvents[name] ||= []).push(callback); },
       setInterval(callback) { intervals.push(callback); return intervals.length; },
       fetch(url, options) {
         requests.push({ url, body: options.body });
@@ -55,6 +57,7 @@ function environment() {
     navigator: {
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 Mobile Safari/604.1',
       maxTouchPoints: 5,
+      webdriver: false,
       sendBeacon() { return false; }
     },
     Date: FakeDate,
@@ -74,7 +77,12 @@ function environment() {
   context.window.Date = FakeDate;
   vm.createContext(context);
   vm.runInContext(source, context);
-  return { context, document, events, windowEvents, intervals, requests, setNow(value) { now = value; } };
+  return {
+    context, document, events, windowEvents, intervals, requests,
+    setNow(value) { now = value; },
+    fireDocument(name) { (events[name] || []).forEach((callback) => callback()); },
+    fireWindow(name) { (windowEvents[name] || []).forEach((callback) => callback()); }
+  };
 }
 
 (async () => {
@@ -87,17 +95,30 @@ function environment() {
   const secondPayload = JSON.parse(second.requests[0].body);
   assert.equal(firstPayload.session_id, secondPayload.session_id, 'tabs must share one session id');
   assert.equal(firstPayload.device_type, 'mobile');
+  assert.equal(firstPayload.webdriver, 0, 'webdriver state must be sent without changing normal collection');
+
+  first.setNow(2_000);
+  first.intervals[1]();
+  assert.equal(first.requests.filter((request) => request.url === '/shadow-signal').length, 0, 'visibility is not confirmed before three seconds');
+  first.fireWindow('scroll');
+  let shadowPayloads = first.requests.filter((request) => request.url === '/shadow-signal').map((request) => JSON.parse(request.body));
+  assert.equal(shadowPayloads.at(-1).visible_confirmed, false, 'early interaction does not fabricate visibility duration');
+  assert.equal(shadowPayloads.at(-1).interaction_mask, 1, 'scroll interaction is recorded as a flag only');
+  first.setNow(3_000);
+  first.intervals[1]();
+  shadowPayloads = first.requests.filter((request) => request.url === '/shadow-signal').map((request) => JSON.parse(request.body));
+  assert.equal(shadowPayloads.at(-1).visible_confirmed, true, 'three visible seconds produce confirmation');
 
   first.setNow(20_000);
   first.intervals[0]();
   first.document.visibilityState = 'hidden';
-  first.events.visibilitychange();
+  first.fireDocument('visibilitychange');
   first.setNow(120_000);
   first.intervals[0]();
   first.document.visibilityState = 'visible';
-  first.events.visibilitychange();
+  first.fireDocument('visibilitychange');
   first.setNow(130_000);
-  first.windowEvents.pagehide();
+  first.fireWindow('pagehide');
 
   const engagement = first.requests
     .filter((request) => request.url === '/engagement')

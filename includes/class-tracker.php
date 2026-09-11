@@ -81,6 +81,8 @@ final class Tracker {
 			array(
 				'endpoint'                 => esc_url_raw( rest_url( 'access-analytics-plus/v1/collect' ) ),
 				'engagementEndpoint'       => esc_url_raw( rest_url( 'access-analytics-plus/v1/engagement' ) ),
+				'shadowEndpoint'           => esc_url_raw( rest_url( 'access-analytics-plus/v1/shadow-signal' ) ),
+				'shadowVisibleSeconds'     => Shadow_Diagnostics::VISIBLE_SECONDS,
 				'sessionTimeout'           => self::SESSION_TIMEOUT,
 				'engagementMaxSeconds'     => self::ENGAGEMENT_MAX_SECONDS,
 				'engagementIdleSeconds'    => 300,
@@ -93,7 +95,7 @@ final class Tracker {
 			return;
 		}
 
-		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。クリック位置や入力内容、生のIPアドレスは解析テーブルへ保存しません。詳細データの初期保存期間は90日です。', 'access-analytics-plus' ) . '</p>';
+		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。人間による閲覧を確認してから通常集計へ反映するため、IPアドレスとUser-Agentを復元できないHMAC識別値、国コード、画面表示や操作の有無を最長7日間保存します。IPアドレスはアクセス時に国コードを判定するためメモリ上で一時利用しますが、生のIPアドレスを解析データとして保存しません。クリック位置、入力内容、User-Agent全文も保存しません。詳細データの初期保存期間は90日です。国判定にはDB-IP Country Liteを利用します。', 'access-analytics-plus' ) . '</p>';
 		wp_add_privacy_policy_content( 'Access Analytics Plus', wp_kses_post( $content ) );
 	}
 
@@ -143,12 +145,28 @@ final class Tracker {
 		$title      = substr( sanitize_text_field( (string) $request->get_param( 'title' ) ), 0, 500 );
 		$referrer   = esc_url_raw( (string) $request->get_param( 'referrer' ) );
 		$device_type = sanitize_key( (string) $request->get_param( 'device_type' ) );
+		$webdriver_state = (int) $request->get_param( 'webdriver' );
+		$origin_present  = '' !== (string) $request->get_header( 'origin' );
 
 		if ( '' === $path ) {
 			return new WP_Error( 'aap_invalid_path', __( 'ページ情報が正しくありません。', 'access-analytics-plus' ), array( 'status' => 400 ) );
 		}
 
-		return self::store_pageview( $visitor_id, $session_id, $path, $title, $referrer, $user_agent, $device_type );
+		$referrer_details = self::classify_referrer( $referrer );
+		$staged = Shadow_Diagnostics::stage( $visitor_id, $session_id, $path, $title, $referrer_details, $user_agent, $device_type, $webdriver_state, $origin_present );
+		if ( false === $staged ) {
+			// Precision first: never bypass confirmation or the configured country filter.
+			return new WP_REST_Response( array( 'accepted' => false ), 202 );
+		}
+
+		return new WP_REST_Response(
+			array(
+				'accepted'         => true,
+				'engagement_token' => $staged['token'],
+				'pending'          => 'pending' === $staged['class'],
+			),
+			201
+		);
 	}
 
 	/**
@@ -179,9 +197,10 @@ final class Tracker {
 			return new WP_REST_Response( array( 'accepted' => false ), 202 );
 		}
 
-		$token_data = self::verify_engagement_token( (string) $request->get_param( 'token' ) );
+		$token = (string) $request->get_param( 'token' );
+		$token_data = str_starts_with( $token, 's.' ) ? Shadow_Diagnostics::accept_engagement( $token ) : self::verify_pageview_token( $token );
 		if ( false === $token_data ) {
-			return new WP_Error( 'aap_invalid_engagement_token', __( '計測情報の有効期限が切れています。', 'access-analytics-plus' ), array( 'status' => 403 ) );
+			return new WP_REST_Response( array( 'accepted' => false ), 202 );
 		}
 
 		global $wpdb;
@@ -206,6 +225,7 @@ final class Tracker {
 		$stored_seconds = (int) $pageview['engaged_seconds'];
 		if ( $seconds <= $stored_seconds ) {
 			$wpdb->query( 'COMMIT' );
+			Shadow_Diagnostics::mark_engagement_received( (int) $pageview['id'] );
 			return new WP_REST_Response( array( 'accepted' => true, 'engaged_seconds' => $stored_seconds ), 200 );
 		}
 
@@ -248,13 +268,14 @@ final class Tracker {
 		}
 
 		$wpdb->query( 'COMMIT' );
+		Shadow_Diagnostics::mark_engagement_received( (int) $pageview['id'] );
 		return new WP_REST_Response( array( 'accepted' => true, 'engaged_seconds' => $seconds ), 200 );
 	}
 
 	/**
 	 * @return WP_REST_Response|WP_Error
 	 */
-	private static function store_pageview( string $visitor_id, string $session_id, string $path, string $title, string $referrer, string $user_agent, string $device_type ) {
+	private static function store_pageview( string $visitor_id, string $session_id, string $path, string $title, string $referrer, string $user_agent, string $device_type, int $webdriver_state, bool $origin_present ) {
 		global $wpdb;
 
 		$tables      = Database::tables();
@@ -336,14 +357,53 @@ final class Tracker {
 
 		$pageview_id = (int) $wpdb->insert_id;
 		self::update_daily_totals( $stat_date, $visitor_key, $session_db_id );
+		$token = self::create_engagement_token( $pageview_id );
 
 		return new WP_REST_Response(
 			array(
 				'accepted'        => true,
-				'engagement_token' => self::create_engagement_token( $pageview_id ),
+				'engagement_token' => $token,
 			),
 			201
 		);
+	}
+
+	/**
+	 * Promotes a staged diagnostic row inside the caller's transaction.
+	 *
+	 * @param array<string,mixed> $row
+	 * @return array{pageview_id:int,session_id:int}|false
+	 */
+	public static function promote_shadow_row( array $row ) {
+		global $wpdb;
+		$tables = Database::tables();
+		$viewed_at = (string) $row['recorded_at'];
+		$page_id = self::find_or_create_page( (string) $row['path'], (string) $row['title'], $viewed_at );
+		if ( $page_id < 1 ) { return false; }
+
+		$session_key = (string) $row['session_key'];
+		$session_id = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$tables['sessions']} WHERE session_key=%s LIMIT 1", $session_key ) );
+		if ( $session_id > 0 ) {
+			$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$tables['sessions']} SET started_at=LEAST(started_at,%s),last_seen_at=GREATEST(last_seen_at,%s),pageview_count=pageview_count+1 WHERE id=%d", $viewed_at, $viewed_at, $session_id ) );
+			if ( false === $updated ) { return false; }
+		} else {
+			$inserted = $wpdb->insert( $tables['sessions'], array(
+				'session_key'=>$session_key, 'visitor_key'=>(string)$row['visitor_key'], 'started_at'=>$viewed_at, 'last_seen_at'=>$viewed_at,
+				'entry_page_id'=>$page_id, 'pageview_count'=>1, 'referrer_type'=>(string)$row['referrer_type'],
+				'referrer_host'=>(string)$row['referrer_host'], 'search_source'=>(string)$row['search_source'], 'device_type'=>(string)$row['reported_device_type'],
+			) );
+			if ( false === $inserted ) {
+				$session_id = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$tables['sessions']} WHERE session_key=%s LIMIT 1", $session_key ) );
+				if ( $session_id < 1 ) { return false; }
+				if ( false === $wpdb->query( $wpdb->prepare( "UPDATE {$tables['sessions']} SET last_seen_at=GREATEST(last_seen_at,%s),pageview_count=pageview_count+1 WHERE id=%d", $viewed_at, $session_id ) ) ) { return false; }
+			} else { $session_id = (int) $wpdb->insert_id; }
+		}
+
+		if ( false === $wpdb->insert( $tables['pageviews'], array( 'session_id'=>$session_id, 'page_id'=>$page_id, 'viewed_at'=>$viewed_at ), array( '%d','%d','%s' ) ) ) { return false; }
+		$pageview_id = (int) $wpdb->insert_id;
+		$stat_date = ( new \DateTimeImmutable( $viewed_at, new \DateTimeZone( 'UTC' ) ) )->setTimezone( wp_timezone() )->format( 'Y-m-d' );
+		if ( ! self::update_daily_totals_without_transaction( $stat_date, (string) $row['visitor_key'], $session_id ) ) { return false; }
+		return array( 'pageview_id'=>$pageview_id, 'session_id'=>$session_id );
 	}
 
 	private static function create_engagement_token( int $pageview_id ): string {
@@ -357,7 +417,7 @@ final class Tracker {
 	/**
 	 * @return array{pageview_id:int,issued_at:int}|false
 	 */
-	private static function verify_engagement_token( string $token ) {
+	public static function verify_pageview_token( string $token ) {
 		if ( 1 !== preg_match( '/^(\d+)\.(\d+)\.(\d+)\.([a-f0-9]{64})$/', $token, $matches ) ) {
 			return false;
 		}
@@ -450,6 +510,13 @@ final class Tracker {
 			)
 		);
 		$wpdb->query( false === $updated ? 'ROLLBACK' : 'COMMIT' );
+	}
+
+	private static function update_daily_totals_without_transaction( string $date, string $visitor_key, int $session_db_id ): bool {
+		global $wpdb; $tables=Database::tables();
+		$is_new_visit=1===$wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$tables['daily_dimensions']} (stat_date,dimension_type,dimension_key) VALUES (%s,'unique_visit',%s)",$date,(string)$session_db_id));
+		$is_new_visitor=1===$wpdb->query($wpdb->prepare("INSERT IGNORE INTO {$tables['daily_dimensions']} (stat_date,dimension_type,dimension_key) VALUES (%s,'unique_visitor',%s)",$date,$visitor_key));
+		return false!==$wpdb->query($wpdb->prepare("INSERT INTO {$tables['daily']} (stat_date,visitors,visits,pageviews) VALUES (%s,%d,%d,1) ON DUPLICATE KEY UPDATE visitors=visitors+VALUES(visitors),visits=visits+VALUES(visits),pageviews=pageviews+1",$date,$is_new_visitor?1:0,$is_new_visit?1:0));
 	}
 
 	private static function normalize_path( string $value ): string {
@@ -555,6 +622,10 @@ final class Tracker {
 	}
 
 	public static function record_exclusion( string $reason ): void {
+		self::record_exclusion_at( $reason, current_datetime()->format( 'Y-m-d' ) );
+	}
+
+	public static function record_exclusion_at( string $reason, string $stat_date ): void {
 		global $wpdb;
 		$table = Database::tables()['exclusions_daily'];
 		$reason = substr( sanitize_key( $reason ), 0, 32 );
@@ -565,7 +636,7 @@ final class Tracker {
 			$wpdb->prepare(
 				"INSERT INTO {$table} (stat_date, reason, excluded_count) VALUES (%s, %s, 1)
 				ON DUPLICATE KEY UPDATE excluded_count = excluded_count + 1",
-				current_datetime()->format( 'Y-m-d' ),
+				$stat_date,
 				$reason
 			)
 		);

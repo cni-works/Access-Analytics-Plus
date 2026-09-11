@@ -49,7 +49,7 @@ $requiredRootFiles = @(
 	'readme.txt',
 	'THIRD_PARTY_NOTICES.md'
 )
-$requiredDirectories = @('assets', 'includes')
+$requiredDirectories = @('assets', 'data', 'includes')
 
 try {
 	New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
@@ -124,6 +124,8 @@ try {
 	if (@($entryNames | Where-Object { -not $_.StartsWith("$slug/") }).Count -gt 0) { $errors.Add("The top-level folder is not $slug.") }
 	if ($entryNames -notcontains "$slug/access-analytics-plus.php") { $errors.Add('The main plugin file is missing.') }
 	if ($entryNames -notcontains "$slug/includes/updater/class-github-release-updater.php") { $errors.Add('The GitHub updater is missing.') }
+	if ($entryNames -notcontains "$slug/data/dbip-country-lite-2026-09.mmdb") { $errors.Add('The bundled DB-IP Country Lite database is missing.') }
+	if ($entryNames -notcontains "$slug/includes/vendor/maxmind-db-reader/LICENSE") { $errors.Add('The MaxMind DB Reader license is missing.') }
 	if (@($entryNames | Where-Object { $_.StartsWith("$slug/$slug/") }).Count -gt 0) { $errors.Add('A duplicate top-level folder was found.') }
 
 	$packagedVersionMatch = [regex]::Match($packagedPluginContents, '(?m)^\s*\*\s*Version:\s*([^\s]+)\s*$')

@@ -20,6 +20,7 @@ final class Database {
 			'daily'            => $wpdb->prefix . 'aap_daily',
 			'daily_dimensions' => $wpdb->prefix . 'aap_daily_dimensions',
 			'exclusions_daily' => $wpdb->prefix . 'aap_exclusions_daily',
+			'shadow_events'    => $wpdb->prefix . 'aap_shadow_events',
 		);
 	}
 
@@ -44,6 +45,13 @@ final class Database {
 		add_option( 'aap_sample_enabled', 0, '', false );
 		add_option( 'aap_sample_scale', 'standard', '', false );
 		add_option( 'aap_sample_seed', wp_rand( 1, 2147483647 ), '', false );
+		add_option( 'aap_shadow_diagnostics_enabled', 1, '', false );
+		add_option( 'aap_country_mode', 'all', '', false );
+		add_option( 'aap_allowed_countries', array( 'JP' ), '', false );
+		add_option( 'aap_trust_cloudflare_country', 0, '', false );
+		add_option( 'aap_geoip_database_state', array(), '', false );
+		add_option( 'aap_geoip_last_check', 0, '', false );
+		add_option( 'aap_confirmation_started_at', current_time( 'mysql', true ), '', false );
 	}
 
 	public static function install(): void {
@@ -132,6 +140,58 @@ final class Database {
 			PRIMARY KEY  (stat_date, reason)
 		) {$charset_collate};";
 
+		$sql[] = "CREATE TABLE {$tables['shadow_events']} (
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			pageview_id bigint(20) unsigned DEFAULT NULL,
+			session_id bigint(20) unsigned DEFAULT NULL,
+			recorded_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			ip_key char(64) NOT NULL DEFAULT '',
+			visitor_key char(64) NOT NULL,
+			session_key char(64) NOT NULL DEFAULT '',
+			ua_hash char(64) NOT NULL,
+			path_hash char(64) NOT NULL DEFAULT '',
+			path varchar(1000) NOT NULL DEFAULT '/',
+			title text NOT NULL,
+			referrer_type varchar(20) NOT NULL DEFAULT 'direct',
+			referrer_host varchar(191) NOT NULL DEFAULT '',
+			search_source varchar(32) NOT NULL DEFAULT '',
+			ua_family varchar(32) NOT NULL DEFAULT 'other',
+			ua_device_type varchar(20) NOT NULL DEFAULT 'other',
+			reported_device_type varchar(20) NOT NULL DEFAULT 'other',
+			country_code char(2) NOT NULL DEFAULT 'ZZ',
+			country_source varchar(16) NOT NULL DEFAULT 'unknown',
+			device_mismatch tinyint(1) unsigned NOT NULL DEFAULT 0,
+			webdriver_state tinyint(2) NOT NULL DEFAULT -1,
+			origin_present tinyint(1) unsigned NOT NULL DEFAULT 0,
+			visible_confirmed tinyint(1) unsigned NOT NULL DEFAULT 0,
+			interaction_mask tinyint(3) unsigned NOT NULL DEFAULT 0,
+			engagement_received tinyint(1) unsigned NOT NULL DEFAULT 0,
+			ip_visitors_10m int(10) unsigned NOT NULL DEFAULT 0,
+			ua_visitors_10m int(10) unsigned NOT NULL DEFAULT 0,
+			ua_path_requests_10m int(10) unsigned NOT NULL DEFAULT 0,
+			visitor_is_new tinyint(1) unsigned NOT NULL DEFAULT 1,
+			regular_interval tinyint(1) unsigned NOT NULL DEFAULT 0,
+			risk_score smallint(5) unsigned NOT NULL DEFAULT 0,
+			risk_flags bigint(20) unsigned NOT NULL DEFAULT 0,
+			shadow_class varchar(16) NOT NULL DEFAULT 'pending',
+			finalized tinyint(1) unsigned NOT NULL DEFAULT 0,
+			aggregation_mode varchar(12) NOT NULL DEFAULT 'legacy',
+			promoted_at datetime DEFAULT NULL,
+			exclusion_recorded tinyint(1) unsigned NOT NULL DEFAULT 0,
+			PRIMARY KEY  (id),
+			UNIQUE KEY pageview_id (pageview_id),
+			KEY recorded_at (recorded_at),
+			KEY ip_recorded (ip_key, recorded_at),
+			KEY visitor_recorded (visitor_key, recorded_at),
+			KEY ua_recorded (ua_hash, recorded_at),
+			KEY ua_path_recorded (ua_hash, path_hash, recorded_at),
+			KEY class_recorded (shadow_class, recorded_at),
+			KEY finalized_recorded (finalized, recorded_at),
+			KEY mode_class_recorded (aggregation_mode, shadow_class, recorded_at),
+			KEY session_id (session_id)
+		) {$charset_collate};";
+
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 
@@ -146,5 +206,12 @@ final class Database {
 		add_option( 'aap_sample_enabled', 0, '', false );
 		add_option( 'aap_sample_scale', 'standard', '', false );
 		add_option( 'aap_sample_seed', wp_rand( 1, 2147483647 ), '', false );
+		add_option( 'aap_shadow_diagnostics_enabled', 1, '', false );
+		add_option( 'aap_country_mode', 'all', '', false );
+		add_option( 'aap_allowed_countries', array( 'JP' ), '', false );
+		add_option( 'aap_trust_cloudflare_country', 0, '', false );
+		add_option( 'aap_geoip_database_state', array(), '', false );
+		add_option( 'aap_geoip_last_check', 0, '', false );
+		add_option( 'aap_confirmation_started_at', current_time( 'mysql', true ), '', false );
 	}
 }

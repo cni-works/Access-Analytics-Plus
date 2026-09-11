@@ -10,6 +10,7 @@ final class Plugin {
 		add_action( 'plugins_loaded', array( Database::class, 'maybe_upgrade' ), 5 );
 
 		Cron::register();
+		GeoIP_Database::register();
 		Tracker::register();
 		Rest_Controller::register();
 		Admin::register();

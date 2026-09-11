@@ -50,6 +50,11 @@ final class Rest_Controller {
 						'type'    => 'string',
 						'enum'    => array( '', 'mobile', 'desktop', 'tablet', 'other' ),
 					),
+					'webdriver' => array(
+						'default' => -1,
+						'type'    => 'integer',
+						'enum'    => array( -1, 0, 1 ),
+					),
 				),
 			)
 		);
@@ -71,6 +76,32 @@ final class Rest_Controller {
 						'type'     => 'integer',
 						'minimum'  => 0,
 						'maximum'  => 1800,
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/shadow-signal',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( Shadow_Diagnostics::class, 'record_signal' ),
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'token' => array(
+						'required' => true,
+						'type'     => 'string',
+					),
+					'visible_confirmed' => array(
+						'default' => false,
+						'type'    => 'boolean',
+					),
+					'interaction_mask' => array(
+						'default' => 0,
+						'type'    => 'integer',
+						'minimum' => 0,
+						'maximum' => 15,
 					),
 				),
 			)

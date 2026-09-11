@@ -6,6 +6,7 @@
   }
 
   var VISITOR_COOKIE = 'aap_vid';
+  var VISITOR_STORAGE = 'aap_visitor_id';
   var SESSION_COOKIE = 'aap_sid';
   var SESSION_STORAGE = 'aap_session_state';
 
@@ -39,8 +40,20 @@
   function getVisitorId() {
     var value = readCookie(VISITOR_COOKIE);
     if (!value) {
+      try {
+        value = window.localStorage.getItem(VISITOR_STORAGE) || '';
+      } catch (error) {
+        // A per-page identifier remains available when both storage methods are blocked.
+      }
+    }
+    if (!value) {
       value = uuid();
-      writeCookie(VISITOR_COOKIE, value, 31536000);
+    }
+    writeCookie(VISITOR_COOKIE, value, 31536000);
+    try {
+      window.localStorage.setItem(VISITOR_STORAGE, value);
+    } catch (error) {
+      // Cookie-only mode remains available when storage access is blocked.
     }
     return value;
   }
@@ -213,6 +226,96 @@
     }, 1000);
   }
 
+  function beginShadowDiagnostics(token) {
+    var endpoint = window.aapTracker.shadowEndpoint;
+    if (!token || !endpoint) {
+      return;
+    }
+
+    var visibleTarget = Number(window.aapTracker.shadowVisibleSeconds || 3) * 1000;
+    var visibleMilliseconds = 0;
+    var lastTick = Date.now();
+    var isVisible = document.visibilityState !== 'hidden';
+    var visibleSent = false;
+    var interactionSent = false;
+    var interactionMask = 0;
+
+    function advance() {
+      var now = Date.now();
+      if (isVisible && now > lastTick) {
+        visibleMilliseconds += now - lastTick;
+      }
+      lastTick = now;
+    }
+
+    function transmit(useBeacon) {
+      var visibleConfirmed = visibleMilliseconds >= visibleTarget;
+      if ((!visibleConfirmed || visibleSent) && (!interactionMask || interactionSent)) {
+        return;
+      }
+
+      var payload = JSON.stringify({
+        token: token,
+        visible_confirmed: visibleConfirmed,
+        interaction_mask: interactionMask
+      });
+      if (visibleConfirmed) {
+        visibleSent = true;
+      }
+      if (interactionMask) {
+        interactionSent = true;
+      }
+
+      if (useBeacon && navigator.sendBeacon) {
+        var blob = new Blob([payload], { type: 'application/json' });
+        if (navigator.sendBeacon(endpoint, blob)) {
+          return;
+        }
+      }
+
+      window.fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      }).catch(function () {
+        // Shadow diagnostics must never interrupt the visitor experience.
+      });
+    }
+
+    function markInteraction(flag) {
+      advance();
+      interactionMask |= flag;
+      transmit(false);
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      advance();
+      isVisible = document.visibilityState !== 'hidden';
+      lastTick = Date.now();
+      transmit(true);
+    });
+    window.addEventListener('scroll', function () { markInteraction(1); }, { passive: true });
+    window.addEventListener('pointerdown', function () { markInteraction(2); }, { passive: true });
+    window.addEventListener('touchstart', function () { markInteraction(4); }, { passive: true });
+    window.addEventListener('keydown', function () { markInteraction(8); });
+    window.addEventListener('pagehide', function () {
+      advance();
+      transmit(true);
+    });
+    window.addEventListener('pageshow', function () {
+      isVisible = document.visibilityState !== 'hidden';
+      lastTick = Date.now();
+    });
+
+    window.setInterval(function () {
+      advance();
+      transmit(false);
+    }, 1000);
+  }
+
   function send(forceNewSession) {
     var payload = {
       visitor_id: getVisitorId(),
@@ -220,7 +323,8 @@
       path: window.location.pathname,
       title: document.title || '',
       referrer: document.referrer || '',
-      device_type: deviceType()
+      device_type: deviceType(),
+      webdriver: typeof navigator.webdriver === 'boolean' ? (navigator.webdriver ? 1 : 0) : -1
     };
 
     window.fetch(window.aapTracker.endpoint, {
@@ -244,6 +348,7 @@
     }).then(function (data) {
       if (data && data.accepted && data.engagement_token) {
         beginEngagement(data.engagement_token);
+        beginShadowDiagnostics(data.engagement_token);
       }
     }).catch(function () {
       // Analytics must never interrupt the visitor experience.

@@ -66,6 +66,10 @@ final class Analytics {
 		if ( Settings::sample_enabled() ) {
 			return self::response( Sample_Data::report( $period, Settings::sample_scale(), Settings::sample_seed() ) );
 		}
+		if ( false === get_transient( 'aap_confirmation_finalize_lock' ) ) {
+			set_transient( 'aap_confirmation_finalize_lock', 1, MINUTE_IN_SECONDS );
+			Shadow_Diagnostics::finalize_pending( 500 );
+		}
 		$cache_key = self::report_cache_key( 'full', $period );
 		$cached    = get_transient( $cache_key );
 		if ( is_array( $cached ) ) {
@@ -589,7 +593,7 @@ final class Analytics {
 			if ( 'administrator' === $key ) {
 				$key = 'user_role';
 			}
-			if ( ! in_array( $key, array( 'bot', 'user_role', 'ip', 'rate_limit', 'origin' ), true ) ) {
+			if ( ! in_array( $key, array( 'bot', 'automation', 'unconfirmed', 'geo_excluded', 'user_role', 'ip', 'rate_limit', 'origin' ), true ) ) {
 				$key = 'other';
 			}
 			$counts[ $key ] = ( $counts[ $key ] ?? 0 ) + (int) $row['total'];
@@ -598,6 +602,9 @@ final class Analytics {
 
 		$labels = array(
 			'bot'        => __( 'Bot・自動巡回', 'access-analytics-plus' ),
+			'automation' => __( 'Bot・自動巡回', 'access-analytics-plus' ),
+			'unconfirmed' => __( '未確認アクセス', 'access-analytics-plus' ),
+			'geo_excluded' => __( '地域設定による対象外', 'access-analytics-plus' ),
 			'user_role'  => __( 'ログインユーザー', 'access-analytics-plus' ),
 			'ip'         => __( 'IP除外', 'access-analytics-plus' ),
 			'rate_limit' => __( '異常な連続送信', 'access-analytics-plus' ),

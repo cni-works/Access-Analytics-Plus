@@ -92,11 +92,11 @@ function reportFor(url) {
 }
 
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-<div class="wrap aap-wrap" data-aap-report data-range="7d" data-period-mode="7d">
+<div class="wrap aap-wrap" data-aap-report data-range="today" data-period-mode="day">
 	<span data-aap-sample-badge hidden>サンプルデータ表示中</span>
   <nav class="aap-periods">
-    <button data-range="today">今日</button><button data-range="yesterday">昨日</button>
-    <button data-range="7d" class="is-active">7日</button><button data-range="30d">30日</button>
+    <button data-range="today" class="is-active">今日</button><button data-range="yesterday">昨日</button>
+    <button data-range="7d">7日</button><button data-range="30d">30日</button>
     <button data-range="month">今月</button><button data-range="custom">期間指定</button>
   </nav>
   <div data-aap-custom-period hidden><input type="date" data-aap-start><input type="date" data-aap-end><button data-aap-apply-period>表示</button></div>
@@ -153,6 +153,11 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   const report = page.locator('.aap-wrap');
   const widget = page.locator('.aap-widget');
 
+  await page.locator('[data-aap-period-label]').filter({ hasText: '2026年8月27日' }).waitFor();
+  assert.equal(await report.getAttribute('data-period-mode'), 'day', 'full report defaults to today');
+  assert.equal(await report.locator('[data-range="today"]').evaluate((node) => node.classList.contains('is-active')), true, 'today tab is initially active');
+  assert.equal(await report.locator('.aap-chart-hit').count(), 24, 'initial report uses hourly data');
+  await report.getByText('7日', { exact: true }).click();
   await page.locator('[data-aap-period-label]').filter({ hasText: '2026/08/21 〜 2026/08/27' }).waitFor();
   assert.equal(await report.locator('[data-aap-calendar-date]').count(), 14);
   assert.equal(await report.locator('.aap-chart-bar').count(), 14, 'two bars per day');

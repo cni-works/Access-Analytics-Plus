@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Access Analytics Plus
  * Description:       WordPress管理画面でアクセス状況を簡単に確認できる軽量アクセス解析プラグインです。
- * Version:           0.5.0-beta
+ * Version:           0.5.2-beta
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            Access Analytics Plus
@@ -21,9 +21,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AAP_VERSION', '0.5.0-beta' );
-define( 'AAP_BUILD', 'beta.20260911.1' );
-define( 'AAP_DB_VERSION', '2' );
+define( 'AAP_VERSION', '0.5.2-beta' );
+define( 'AAP_BUILD', 'beta.20260911.5' );
+define( 'AAP_DB_VERSION', '5' );
 define( 'AAP_PLUGIN_FILE', __FILE__ );
 define( 'AAP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AAP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -69,6 +69,9 @@ require_once AAP_PLUGIN_DIR . 'includes/class-database.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-capabilities.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-activator.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-cron.php';
+require_once AAP_PLUGIN_DIR . 'includes/class-geoip-database.php';
+require_once AAP_PLUGIN_DIR . 'includes/class-country-resolver.php';
+require_once AAP_PLUGIN_DIR . 'includes/class-shadow-diagnostics.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-settings.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-tracker.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-rest-controller.php';

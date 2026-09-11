@@ -35,6 +35,7 @@ final class Dashboard_Widget {
 			<p class="aap-widget-month" data-aap-month></p>
 			<div class="aap-widget-top-page" data-aap-pages></div>
 			<a class="button button-primary aap-detail-button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . Admin::PAGE_SLUG ) ); ?>"><?php esc_html_e( '詳しいアクセス解析を見る', 'access-analytics-plus' ); ?></a>
+			<p class="aap-geoip-attribution"><a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a></p>
 		</div>
 		<?php
 	}

@@ -70,7 +70,7 @@ final class Admin {
 		}
 		$today = current_datetime()->format( 'Y-m-d' );
 		?>
-		<div class="wrap aap-wrap" data-aap-report data-range="7d" data-period-mode="7d">
+		<div class="wrap aap-wrap" data-aap-report data-range="today" data-period-mode="day">
 			<header class="aap-header">
 				<div>
 					<h1><?php esc_html_e( 'アクセス解析', 'access-analytics-plus' ); ?></h1>
@@ -96,9 +96,9 @@ final class Admin {
 			</section>
 
 			<nav class="aap-periods" aria-label="<?php esc_attr_e( '表示期間', 'access-analytics-plus' ); ?>">
-				<button type="button" data-range="today"><?php esc_html_e( '今日', 'access-analytics-plus' ); ?></button>
+				<button type="button" data-range="today" class="is-active"><?php esc_html_e( '今日', 'access-analytics-plus' ); ?></button>
 				<button type="button" data-range="yesterday"><?php esc_html_e( '昨日', 'access-analytics-plus' ); ?></button>
-				<button type="button" data-range="7d" class="is-active"><?php esc_html_e( '7日', 'access-analytics-plus' ); ?></button>
+				<button type="button" data-range="7d"><?php esc_html_e( '7日', 'access-analytics-plus' ); ?></button>
 				<button type="button" data-range="30d"><?php esc_html_e( '30日', 'access-analytics-plus' ); ?></button>
 				<button type="button" data-range="month"><?php esc_html_e( '今月', 'access-analytics-plus' ); ?></button>
 				<button type="button" data-range="custom"><?php esc_html_e( '期間指定', 'access-analytics-plus' ); ?></button>
@@ -149,6 +149,7 @@ final class Admin {
 				<summary><span><?php esc_html_e( 'この期間に除外したアクセス', 'access-analytics-plus' ); ?></span><strong data-aap-exclusions-total>0件</strong></summary>
 				<div class="aap-exclusion-items" data-aap-exclusion-items></div>
 			</details>
+			<p class="aap-geoip-attribution"><a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a></p>
 		</div>
 		<?php
 	}
