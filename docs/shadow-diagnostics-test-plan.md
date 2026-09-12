@@ -4,7 +4,7 @@
 
 新しいアクセスを確認信号が届くまで仮保存し、確認済みだけが通常集計へ一度だけ昇格することと、診断材料を最長7日間だけ保存することを確認する。
 
-## DB Version 4 追加確認
+## DB Version 8 追加確認
 
 - 3秒表示、各操作、engagementの各経路で1回だけconfirmedへ昇格する。
 - 同じsignal / beaconの再送、複数タブ、bfcache復帰でも二重加算されない。
@@ -21,6 +21,12 @@
 - `node tools/admin-ui-regression.js`
 - 全PHPファイルの`php -l`
 
+DisposableなWordPress開発DBでは、環境種別を`local`または`development`にしたうえで次を実行する。
+
+`AAP_ALLOW_INTEGRATION_TEST=1 wp eval-file tools/wordpress-promotion-integration.php`
+
+このテストは実REST routeとWordPress DBを使用し、正常な`collect → signal → confirmed → session/pageview/daily`、daily直前の失敗注入とロールバック、旧Tracker Build検出を確認する。保護条件を満たさない本番DBでは実行を拒否する。
+
 ## DB
 
 1. `aap_shadow_events.pageview_id`がUNIQUEで、同じPVの診断行が重複しない。
@@ -34,6 +40,10 @@
 2. 非表示タブの時間を3秒へ加算しない。
 3. スクロール、ポインター、タップ、キー操作は位置や内容を保存せずビットだけを保存する。
 4. 同じ信号を再送しても状態が後戻りせず、重複加算されない。
+5. 最初のsignalが失敗した場合、1秒・3秒・8秒の上限付き再送で成功できる。
+6. RESTまたはpromotionが失敗した場合は成功応答を返さず、失敗段階を診断行へ残す。
+7. Tracker BuildがPHP Buildと異なる場合はBuild不一致として集計するが、collect自体は拒否しない。
+8. dbDelta後の必須カラムまたはINDEXが欠ける場合、DB Versionを更新しない。
 5. engagementが届いた場合だけ`engagement_received`が立つ。
 
 ## 判定

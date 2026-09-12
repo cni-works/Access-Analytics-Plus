@@ -11,6 +11,7 @@ final class Plugin {
 
 		Cron::register();
 		GeoIP_Database::register();
+		Region_Database::register();
 		Tracker::register();
 		Rest_Controller::register();
 		Admin::register();

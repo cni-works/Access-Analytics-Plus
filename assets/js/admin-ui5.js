@@ -740,6 +740,64 @@
     renderBarItems(target, devices);
   }
 
+  function renderRegions(container, regions) {
+    var target = container.querySelector('[data-aap-regions]');
+    if (!target) return;
+    var data = regions || { total: 0, items: [], partial: false, tracking_started: '' };
+    var known = (data.items || []).filter(function (item) { return item.key !== 'unknown'; });
+    var unknown = (data.items || []).filter(function (item) { return item.key === 'unknown'; });
+
+    function regionRow(row) {
+      var item = document.createElement('div');
+      item.className = 'aap-bar-item aap-region-item';
+      var heading = document.createElement('div');
+      heading.className = 'aap-bar-heading';
+      var label = document.createElement('span');
+      label.textContent = row.label;
+      var value = document.createElement('strong');
+      value.textContent = number.format(row.value) + '人　' + row.percent + '%';
+      heading.append(label, value);
+      var track = document.createElement('div');
+      track.className = 'aap-bar-track';
+      track.setAttribute('role', 'img');
+      track.setAttribute('aria-label', row.label + ' ' + number.format(row.value) + '人 ' + row.percent + '%');
+      var bar = document.createElement('span');
+      bar.style.width = Math.min(100, row.percent) + '%';
+      track.appendChild(bar);
+      item.append(heading, track);
+      return item;
+    }
+
+    function draw(expanded) {
+      clear(target);
+      if (!data.items || !data.items.length) {
+        target.textContent = window.aapAdmin.strings.empty;
+      } else {
+        var rows = expanded ? known.slice() : known.slice(0, 5);
+        if (!expanded && known.length > 5) {
+          var otherValue = known.slice(5).reduce(function (sum, row) { return sum + row.value; }, 0);
+          rows.push({ key: 'other', label: 'その他国内', value: otherValue, percent: data.total > 0 ? Math.round(otherValue / data.total * 1000) / 10 : 0 });
+        }
+        rows.concat(unknown).forEach(function (row) { target.appendChild(regionRow(row)); });
+      }
+      if (known.length > 5) {
+        var toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'button-link aap-region-toggle';
+        toggle.textContent = expanded ? '上位だけ表示' : 'すべての都道府県を見る';
+        toggle.addEventListener('click', function () { draw(!expanded); });
+        target.appendChild(toggle);
+      }
+      if (data.partial && data.tracking_started) {
+        var partial = document.createElement('p');
+        partial.className = 'aap-region-partial';
+        partial.textContent = '地域データは ' + data.tracking_started.slice(0, 10).replace(/-/g, '/') + ' 以降のアクセスを対象としています。';
+        target.appendChild(partial);
+      }
+    }
+    draw(false);
+  }
+
   function renderExclusions(container, exclusions) {
     var details = container.querySelector('[data-aap-exclusions]');
     if (!details) return;
@@ -830,6 +888,7 @@
 	  renderTimeseriesList(container, data.timeseries, compact);
 	  renderSources(container, data.sources, data.source_details || { search: [], social: [] });
       renderPages(container, data.pages, compact);
+	  renderRegions(container, data.regions || null);
 	  renderDevices(container, data.devices || []);
 	  renderExclusions(container, data.exclusions || null);
 	  var month = container.querySelector('[data-aap-month]');

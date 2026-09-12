@@ -37,6 +37,8 @@ $uploads = wp_upload_dir( null, false );
 if ( empty( $uploads['error'] ) && ! empty( $uploads['basedir'] ) ) {
 	$geo_directory = trailingslashit( (string) $uploads['basedir'] ) . 'access-analytics-plus/geo';
 	$geo_files = glob( trailingslashit( $geo_directory ) . 'dbip-country-lite-????-??.mmdb' ) ?: array();
+	$region_files = glob( trailingslashit( $geo_directory ) . 'aap-japan-prefecture-????-??-????????????.mmdb' ) ?: array();
+	$geo_files = array_merge( $geo_files, $region_files );
 	foreach ( $geo_files as $geo_file ) {
 		if ( is_file( $geo_file ) ) { @unlink( $geo_file ); }
 	}
@@ -46,6 +48,9 @@ if ( empty( $uploads['error'] ) && ! empty( $uploads['basedir'] ) ) {
 }
 
 delete_option( 'aap_db_version' );
+delete_option( 'aap_db_schema_error' );
+delete_option( 'aap_schema_repair_lock' );
+delete_option( 'aap_last_collect_failure' );
 delete_option( 'aap_retention_days' );
 delete_option( 'aap_delete_data_on_uninstall' );
 delete_option( 'aap_installed_at' );
@@ -63,5 +68,8 @@ delete_option( 'aap_trust_cloudflare_country' );
 delete_option( 'aap_geoip_database_state' );
 delete_option( 'aap_geoip_last_check' );
 delete_option( 'aap_confirmation_started_at' );
+delete_option( 'aap_region_tracking_started_at' );
+delete_option( 'aap_region_database_state' );
+delete_option( 'aap_region_database_last_check' );
 delete_transient( 'aap_confirmation_finalize_lock' );
 delete_option( 'aap_last_daily_rebuild' );

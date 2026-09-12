@@ -1,4 +1,4 @@
-# 確認済みアクセス集計（DB Version 4）
+# 確認済みアクセス集計（DB Version 8）
 
 新規アクセスは `aap_shadow_events` に `aggregation_mode=staged` として仮保存する。生IPとUser-Agent全文は保存せず、用途別HMAC、UA系統、端末分類、ISO国コード、表示・操作・engagement信号だけを7日間保持する。
 
@@ -9,3 +9,7 @@
 国判定は外部APIを呼ばない。明示的に信頼した `CF-IPCountry`、明示的に信頼したサーバー変数 `GEOIP_COUNTRY_CODE`、または `aap_country_code` フィルターを使用する。Cloudflareを経由しない接続からヘッダーを偽装されない構成確認はサイト管理者の責任範囲となる。
 
 既知Bot、除外ユーザー、除外IP、外部Origin、レート制限は仮保存より前に従来どおり処理する。旧ビルドが発行したpageview tokenは移行直後の通信だけ互換受理する。
+
+確認信号はHTTP成功応答後にだけ送信済みとし、一時失敗は1秒・3秒・8秒間隔で合計3回まで再送する。集団的なIP・UA傾向は、3秒表示や操作などの直接信号がある場合にはBot除外の決定条件にしない。
+
+DB Version 8ではTracker Build、処理段階、昇格試行数、失敗段階・種別・サニタイズ済みDBエラーを7日間の診断行へ保持する。再送時は匿名化したcollect IDのUNIQUE制約で同じ仮保存行を再利用する。既存サイトではpageview_id・session_id・collect_keyを明示的にNULL許可へ移行し、未確定値0をNULLへ変換する。DB Versionは移行と必須テーブル・カラム・INDEX検査の完了後だけ更新する。

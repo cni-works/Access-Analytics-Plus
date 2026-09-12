@@ -86,6 +86,7 @@ final class Tracker {
 				'sessionTimeout'           => self::SESSION_TIMEOUT,
 				'engagementMaxSeconds'     => self::ENGAGEMENT_MAX_SECONDS,
 				'engagementIdleSeconds'    => 300,
+				'build'                    => AAP_BUILD,
 			)
 		);
 	}
@@ -95,7 +96,7 @@ final class Tracker {
 			return;
 		}
 
-		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。人間による閲覧を確認してから通常集計へ反映するため、IPアドレスとUser-Agentを復元できないHMAC識別値、国コード、画面表示や操作の有無を最長7日間保存します。IPアドレスはアクセス時に国コードを判定するためメモリ上で一時利用しますが、生のIPアドレスを解析データとして保存しません。クリック位置、入力内容、User-Agent全文も保存しません。詳細データの初期保存期間は90日です。国判定にはDB-IP Country Liteを利用します。', 'access-analytics-plus' ) . '</p>';
+		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。人間による閲覧を確認してから通常集計へ反映するため、IPアドレスとUser-Agentを復元できないHMAC識別値、国コード、画面表示や操作の有無を最長7日間保存します。IPアドレスはアクセス時に国コードと、日本国内の場合は都道府県コードを推定するためメモリ上で一時利用しますが、生のIPアドレスを解析データとして保存しません。クリック位置、入力内容、User-Agent全文も保存しません。詳細データの初期保存期間は90日です。国・都道府県判定にはDB-IP Lite由来のローカルデータを利用します。', 'access-analytics-plus' ) . '</p>';
 		wp_add_privacy_policy_content( 'Access Analytics Plus', wp_kses_post( $content ) );
 	}
 
@@ -133,6 +134,7 @@ final class Tracker {
 			return new WP_REST_Response( array( 'accepted' => false ), 202 );
 		}
 
+		$collect_id = strtolower( (string) $request->get_param( 'collect_id' ) );
 		$visitor_id = strtolower( (string) $request->get_param( 'visitor_id' ) );
 		$session_id = strtolower( (string) $request->get_param( 'session_id' ) );
 
@@ -142,10 +144,13 @@ final class Tracker {
 		}
 
 		$path       = self::normalize_path( (string) $request->get_param( 'path' ) );
-		$title      = substr( sanitize_text_field( (string) $request->get_param( 'title' ) ), 0, 500 );
+		// substr() can split a multibyte Japanese title in the middle of a UTF-8
+		// character, which makes wpdb reject the field before executing the INSERT.
+		$title      = wp_html_excerpt( sanitize_text_field( (string) $request->get_param( 'title' ) ), 500, '' );
 		$referrer   = esc_url_raw( (string) $request->get_param( 'referrer' ) );
 		$device_type = sanitize_key( (string) $request->get_param( 'device_type' ) );
 		$webdriver_state = (int) $request->get_param( 'webdriver' );
+		$tracker_build   = substr( sanitize_text_field( (string) $request->get_param( 'tracker_build' ) ), 0, 64 );
 		$origin_present  = '' !== (string) $request->get_header( 'origin' );
 
 		if ( '' === $path ) {
@@ -153,10 +158,15 @@ final class Tracker {
 		}
 
 		$referrer_details = self::classify_referrer( $referrer );
-		$staged = Shadow_Diagnostics::stage( $visitor_id, $session_id, $path, $title, $referrer_details, $user_agent, $device_type, $webdriver_state, $origin_present );
+		$staged = Shadow_Diagnostics::stage( $collect_id, $visitor_id, $session_id, $path, $title, $referrer_details, $user_agent, $device_type, $webdriver_state, $origin_present, $tracker_build );
 		if ( false === $staged ) {
 			// Precision first: never bypass confirmation or the configured country filter.
-			return new WP_REST_Response( array( 'accepted' => false ), 202 );
+			// A retryable server error lets the tracker distinguish this from an intentional exclusion.
+			return new WP_Error(
+				'aap_shadow_stage_failed',
+				__( 'アクセス確認の仮保存に失敗しました。', 'access-analytics-plus' ),
+				array( 'status' => 503, 'retryable' => true )
+			);
 		}
 
 		return new WP_REST_Response(
@@ -372,38 +382,82 @@ final class Tracker {
 	 * Promotes a staged diagnostic row inside the caller's transaction.
 	 *
 	 * @param array<string,mixed> $row
-	 * @return array{pageview_id:int,session_id:int}|false
+	 * @return array{success:bool,pageview_id:int,session_id:int,stage:string,error_type:string,error_message:string}
 	 */
-	public static function promote_shadow_row( array $row ) {
+	public static function promote_shadow_row( array $row ): array {
 		global $wpdb;
 		$tables = Database::tables();
 		$viewed_at = (string) $row['recorded_at'];
 		$page_id = self::find_or_create_page( (string) $row['path'], (string) $row['title'], $viewed_at );
-		if ( $page_id < 1 ) { return false; }
+		if ( $page_id < 1 ) {
+			return self::promotion_failure( 'page', 'page_create_failed' );
+		}
 
 		$session_key = (string) $row['session_key'];
 		$session_id = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$tables['sessions']} WHERE session_key=%s LIMIT 1", $session_key ) );
 		if ( $session_id > 0 ) {
 			$updated = $wpdb->query( $wpdb->prepare( "UPDATE {$tables['sessions']} SET started_at=LEAST(started_at,%s),last_seen_at=GREATEST(last_seen_at,%s),pageview_count=pageview_count+1 WHERE id=%d", $viewed_at, $viewed_at, $session_id ) );
-			if ( false === $updated ) { return false; }
+			if ( false === $updated ) {
+				return self::promotion_failure( 'session', 'session_update_failed' );
+			}
 		} else {
 			$inserted = $wpdb->insert( $tables['sessions'], array(
 				'session_key'=>$session_key, 'visitor_key'=>(string)$row['visitor_key'], 'started_at'=>$viewed_at, 'last_seen_at'=>$viewed_at,
 				'entry_page_id'=>$page_id, 'pageview_count'=>1, 'referrer_type'=>(string)$row['referrer_type'],
 				'referrer_host'=>(string)$row['referrer_host'], 'search_source'=>(string)$row['search_source'], 'device_type'=>(string)$row['reported_device_type'],
+				'country_code'=>Country_Resolver::normalize( (string) ( $row['country_code'] ?? 'ZZ' ) ),
+				'region_code'=>Region_Resolver::normalize( (string) ( $row['region_code'] ?? '' ) ),
 			) );
 			if ( false === $inserted ) {
 				$session_id = (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$tables['sessions']} WHERE session_key=%s LIMIT 1", $session_key ) );
-				if ( $session_id < 1 ) { return false; }
-				if ( false === $wpdb->query( $wpdb->prepare( "UPDATE {$tables['sessions']} SET last_seen_at=GREATEST(last_seen_at,%s),pageview_count=pageview_count+1 WHERE id=%d", $viewed_at, $session_id ) ) ) { return false; }
+				if ( $session_id < 1 ) {
+					return self::promotion_failure( 'session', 'session_create_failed' );
+				}
+				if ( false === $wpdb->query( $wpdb->prepare( "UPDATE {$tables['sessions']} SET last_seen_at=GREATEST(last_seen_at,%s),pageview_count=pageview_count+1 WHERE id=%d", $viewed_at, $session_id ) ) ) {
+					return self::promotion_failure( 'session', 'session_update_failed' );
+				}
 			} else { $session_id = (int) $wpdb->insert_id; }
 		}
 
-		if ( false === $wpdb->insert( $tables['pageviews'], array( 'session_id'=>$session_id, 'page_id'=>$page_id, 'viewed_at'=>$viewed_at ), array( '%d','%d','%s' ) ) ) { return false; }
+		if ( false === $wpdb->insert( $tables['pageviews'], array( 'session_id'=>$session_id, 'page_id'=>$page_id, 'viewed_at'=>$viewed_at ), array( '%d','%d','%s' ) ) ) {
+			return self::promotion_failure( 'pageview', 'pageview_create_failed' );
+		}
 		$pageview_id = (int) $wpdb->insert_id;
 		$stat_date = ( new \DateTimeImmutable( $viewed_at, new \DateTimeZone( 'UTC' ) ) )->setTimezone( wp_timezone() )->format( 'Y-m-d' );
-		if ( ! self::update_daily_totals_without_transaction( $stat_date, (string) $row['visitor_key'], $session_id ) ) { return false; }
-		return array( 'pageview_id'=>$pageview_id, 'session_id'=>$session_id );
+		if ( self::should_inject_promotion_failure( 'daily' ) ) {
+			return self::promotion_failure( 'daily', 'injected_sql_failure' );
+		}
+		if ( ! self::update_daily_totals_without_transaction( $stat_date, (string) $row['visitor_key'], $session_id ) ) {
+			return self::promotion_failure( 'daily', 'daily_update_failed' );
+		}
+		return array(
+			'success'       => true,
+			'pageview_id'   => $pageview_id,
+			'session_id'    => $session_id,
+			'stage'         => 'completed',
+			'error_type'    => '',
+			'error_message' => '',
+		);
+	}
+
+	/** @return array{success:bool,pageview_id:int,session_id:int,stage:string,error_type:string,error_message:string} */
+	private static function promotion_failure( string $stage, string $error_type ): array {
+		global $wpdb;
+		return array(
+			'success'       => false,
+			'pageview_id'   => 0,
+			'session_id'    => 0,
+			'stage'         => $stage,
+			'error_type'    => $error_type,
+			'error_message' => Shadow_Diagnostics::sanitize_database_error( (string) $wpdb->last_error ),
+		);
+	}
+
+	private static function should_inject_promotion_failure( string $stage ): bool {
+		if ( ! defined( 'AAP_ENABLE_TEST_FAILURES' ) || ! AAP_ENABLE_TEST_FAILURES ) {
+			return false;
+		}
+		return (bool) apply_filters( 'aap_test_promotion_failure', false, $stage );
 	}
 
 	private static function create_engagement_token( int $pageview_id ): string {

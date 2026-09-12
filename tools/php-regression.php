@@ -88,6 +88,7 @@ foreach ( $scale_ranges as $scale => [ $minimum, $maximum ] ) {
 	expect( array_sum( array_column( $sample['source_details']['social'], 'value' ) ) === (int) $source_values['social'], "sample {$scale} social detail total" );
 	expect( array_sum( array_column( $sample['devices'], 'value' ) ) === $visits, "sample {$scale} device total" );
 	expect( array_sum( array_column( $sample['pages'], 'pageviews' ) ) === (int) $sample['metrics']['pageviews']['value'], "sample {$scale} page total" );
+	expect( array_sum( array_column( $sample['regions']['items'], 'value' ) ) === (int) $sample['regions']['total'], "sample {$scale} region total" );
 }
 $same_sample = Sample_Data::report( $sample_period, 'standard', 24680 );
 expect( $same_sample === Sample_Data::report( $sample_period, 'standard', 24680 ), 'sample data remains fixed for the same seed' );

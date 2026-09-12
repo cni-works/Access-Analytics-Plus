@@ -63,6 +63,16 @@ final class Sample_Data {
 				'social' => self::simple_counts( (int) ( $source_counts['social'] ?? 0 ), array( 'Instagram', 'Facebook', 'X' ), array( 0.52, 0.31, 0.17 ) ),
 			),
 			'pages'          => self::pages( $current['pageviews'] ),
+			'regions'        => array(
+				'total' => $current['visitors'],
+				'items' => self::distribution(
+					$current['visitors'],
+					array( 'JP-13' => '東京都', 'JP-11' => '埼玉県', 'JP-14' => '神奈川県', 'JP-12' => '千葉県', 'JP-27' => '大阪府', 'unknown' => '判定不能' ),
+					array( 0.46, 0.2, 0.14, 0.09, 0.07, 0.04 )
+				),
+				'tracking_started' => '',
+				'partial' => false,
+			),
 			'devices'        => self::distribution(
 				$current['visits'],
 				array( 'mobile' => 'スマートフォン', 'desktop' => 'PC', 'tablet' => 'タブレット' ),

@@ -80,6 +80,20 @@ function reportFor(url) {
     sources: [{ label: '検索', percent: 60 }],
     source_details: { search: [], social: [] },
     pages: [{ title: '会社案内', pageviews: 5 }],
+    regions: {
+      total: 12,
+      items: [
+        { key: 'JP-13', label: '東京都', value: 5, percent: 41.7 },
+        { key: 'JP-11', label: '埼玉県', value: 2, percent: 16.7 },
+        { key: 'JP-14', label: '神奈川県', value: 1, percent: 8.3 },
+        { key: 'JP-12', label: '千葉県', value: 1, percent: 8.3 },
+        { key: 'JP-27', label: '大阪府', value: 1, percent: 8.3 },
+        { key: 'JP-01', label: '北海道', value: 1, percent: 8.3 },
+        { key: 'JP-02', label: '青森県', value: 1, percent: 8.3 },
+        { key: 'unknown', label: '判定不能', value: 0, percent: 0 },
+      ],
+      tracking_started: '2026-08-01 00:00:00', partial: false,
+    },
     devices: [{ label: 'スマートフォン', percent: 70 }],
     exclusions: { total: 1, items: [{ label: 'Bot', value: 1 }] },
     dashboard: dashboardContext ? {
@@ -109,6 +123,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   </div><div class="aap-overview-metrics"><div data-aap-status></div><div class="aap-metrics" data-aap-metrics></div><p data-aap-metrics-summary></p></div></div>
   <section class="aap-panel aap-chart-panel"><span data-aap-updated></span><div data-aap-chart></div><details class="aap-timeseries-disclosure" data-aap-timeseries-disclosure open><summary>日ごとの数字を見る</summary><div data-aap-timeseries-list></div></details></section>
   <div class="aap-grid"><section class="aap-panel"><div data-aap-sources></div><div data-aap-source-details></div></section><section class="aap-panel"><div data-aap-pages></div></section></div>
+  <section class="aap-panel aap-region-panel"><div data-aap-regions></div><p class="aap-region-note">推定値です</p></section>
   <section class="aap-panel"><div data-aap-devices></div></section>
   <details data-aap-exclusions><strong data-aap-exclusions-total></strong><div data-aap-exclusion-items></div></details>
 </div>
@@ -228,6 +243,11 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   assert.equal(await page.locator('.aap-timeseries-row').count(), 7);
   assert.ok(await page.locator('.aap-chart-y-label').count() > 0, 'Y-axis labels must be rendered');
 	assert.equal(await report.locator('[data-aap-sample-badge]').isVisible(), true);
+  assert.match(await report.locator('[data-aap-regions]').innerText(), /東京都/);
+  assert.match(await report.locator('[data-aap-regions]').innerText(), /5人/);
+  assert.match(await report.locator('[data-aap-regions]').innerText(), /その他国内/);
+  await report.getByText('すべての都道府県を見る', { exact: true }).click();
+  assert.match(await report.locator('[data-aap-regions]').innerText(), /北海道/);
 
   await report.getByText('今日', { exact: true }).click();
   await page.locator('[data-aap-period-label]').filter({ hasText: '2026年8月27日' }).waitFor();

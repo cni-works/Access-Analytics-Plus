@@ -36,6 +36,8 @@ final class Cron {
 
 		// The updater is throttled internally and always falls back to an existing local database.
 		GeoIP_Database::maybe_update();
+		// The prefecture feed is separate from plugin releases and is a no-op until configured.
+		Region_Database::maybe_update();
 
 		$yesterday = current_datetime()->modify( '-1 day' )->format( 'Y-m-d' );
 		if ( $yesterday !== (string) get_option( 'aap_last_daily_rebuild', '' ) ) {

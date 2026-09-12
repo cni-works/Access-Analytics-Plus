@@ -293,6 +293,13 @@ button.aap-timeseries-row:focus-visible { background: var(--aap-accent-soft); bo
 .aap-geoip-status dd.is-error { color: #8a6116; }
 .aap-geoip-attribution { color: var(--aap-muted); font-size: 11px; margin: 12px 0 0; text-align: right; }
 .aap-geoip-attribution a { color: inherit; }
+.aap-region-panel { margin-bottom: 18px; }
+.aap-region-panel [data-aap-regions] { max-width: 840px; }
+.aap-region-item .aap-bar-heading strong { font-variant-numeric: tabular-nums; }
+.aap-region-note,
+.aap-region-partial { color: var(--aap-muted); font-size: 12px; margin: 13px 0 0; }
+.aap-region-partial { background: var(--aap-bg); border-radius: 7px; padding: 9px 11px; }
+.aap-region-toggle { margin-top: 14px; min-height: 36px; }
 
 #aap_dashboard_widget .inside { margin: 0; padding: 16px; }
 .aap-widget-periods { background: var(--aap-bg); border: 1px solid var(--aap-border); border-radius: 9px; display: grid; gap: 3px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 12px; padding: 3px; }

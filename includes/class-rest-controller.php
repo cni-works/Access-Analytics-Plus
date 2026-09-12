@@ -32,6 +32,11 @@ final class Rest_Controller {
 				'callback'            => array( Tracker::class, 'collect' ),
 				'permission_callback' => '__return_true',
 				'args'                => array(
+					'collect_id' => array(
+						'default'           => '',
+						'type'              => 'string',
+						'validate_callback' => array( self::class, 'is_optional_uuid' ),
+					),
 					'visitor_id' => array(
 						'required'          => true,
 						'type'              => 'string',
@@ -54,6 +59,11 @@ final class Rest_Controller {
 						'default' => -1,
 						'type'    => 'integer',
 						'enum'    => array( -1, 0, 1 ),
+					),
+					'tracker_build' => array(
+						'default'           => 'unknown',
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_text_field',
 					),
 				),
 			)
@@ -127,5 +137,9 @@ final class Rest_Controller {
 	public static function is_uuid( mixed $value, WP_REST_Request $request, string $param ): bool {
 		unset( $request, $param );
 		return is_string( $value ) && 1 === preg_match( '/^[a-f0-9-]{36}$/i', $value );
+	}
+
+	public static function is_optional_uuid( mixed $value, WP_REST_Request $request, string $param ): bool {
+		return '' === $value || self::is_uuid( $value, $request, $param );
 	}
 }

@@ -108,6 +108,7 @@ final class Analytics {
 					'social' => self::traffic_details( 'social', $period['start'], $period['end_exclusive'] ),
 				),
 				'pages'      => self::popular_pages( $period['start'], $period['end_exclusive'] ),
+				'regions'    => self::regions( $period['start'], $period['end_exclusive'] ),
 				'devices'    => self::devices( $period['start'], $period['end_exclusive'] ),
 				'exclusions' => self::exclusions( $period['start'], $period['end_exclusive'] ),
 				'dashboard'  => null,
@@ -139,6 +140,7 @@ final class Analytics {
 				'sources'        => array(),
 				'source_details' => array( 'search' => array(), 'social' => array() ),
 				'pages'          => self::popular_pages( $period['start'], $period['end_exclusive'] ),
+				'regions'        => array( 'total' => 0, 'items' => array(), 'tracking_started' => '', 'partial' => false ),
 				'devices'        => array(),
 				'exclusions'     => array( 'total' => 0, 'items' => array() ),
 				'dashboard'      => $dashboard,
@@ -569,6 +571,61 @@ final class Analytics {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Assigns each domestic unique visitor to the first confirmed session created
+	 * for that visitor in the selected period. Region totals therefore never grow
+	 * when the same visitor views more pages or starts another session.
+	 *
+	 * @return array{total:int,items:array<int,array{key:string,label:string,value:int,percent:float}>,tracking_started:string,partial:bool}
+	 */
+	private static function regions( DateTimeImmutable $start, DateTimeImmutable $end ): array {
+		global $wpdb;
+		$table = Database::tables()['sessions'];
+		$tracking_started = (string) get_option( 'aap_region_tracking_started_at', '' );
+		if ( '' === $tracking_started ) {
+			$tracking_started = current_time( 'mysql', true );
+			add_option( 'aap_region_tracking_started_at', $tracking_started, '', false );
+		}
+		$start_utc = self::utc( $start );
+		$end_utc = self::utc( $end );
+		$effective_start = $tracking_started > $start_utc ? $tracking_started : $start_utc;
+		$partial = $effective_start > $start_utc;
+		if ( $effective_start >= $end_utc ) {
+			return array( 'total' => 0, 'items' => array(), 'tracking_started' => $tracking_started, 'partial' => $partial );
+		}
+
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT selected.region_code, COUNT(*) AS visitors
+				FROM {$table} selected
+				INNER JOIN (
+					SELECT visitor_key, MIN(id) AS first_session_id
+					FROM {$table}
+					WHERE started_at >= %s AND started_at < %s AND country_code = 'JP'
+					GROUP BY visitor_key
+				) first_visit ON first_visit.first_session_id = selected.id
+				GROUP BY selected.region_code
+				ORDER BY visitors DESC, selected.region_code ASC",
+				$effective_start,
+				$end_utc
+			),
+			ARRAY_A
+		);
+		$total = array_sum( array_map( static fn ( array $row ): int => (int) $row['visitors'], (array) $rows ) );
+		$items = array();
+		foreach ( (array) $rows as $row ) {
+			$code = Region_Resolver::normalize( (string) $row['region_code'] );
+			$value = (int) $row['visitors'];
+			$items[] = array(
+				'key' => '' !== $code ? $code : 'unknown',
+				'label' => '' !== $code ? Region_Resolver::label( $code ) : __( '判定不能', 'access-analytics-plus' ),
+				'value' => $value,
+				'percent' => $total > 0 ? round( $value / $total * 100, 1 ) : 0.0,
+			);
+		}
+		return array( 'total' => $total, 'items' => $items, 'tracking_started' => $tracking_started, 'partial' => $partial );
 	}
 
 	/**

@@ -236,21 +236,34 @@
     var visibleMilliseconds = 0;
     var lastTick = Date.now();
     var isVisible = document.visibilityState !== 'hidden';
-    var visibleSent = false;
-    var interactionSent = false;
+    var visibleAcknowledged = false;
+    var interactionAcknowledged = 0;
     var interactionMask = 0;
+    var requestInFlight = false;
+    var retryAttempts = 0;
+    var retryScheduled = false;
+    var retryExhausted = false;
+    var MAX_RETRIES = 3;
+    var RETRY_DELAYS = [1000, 3000, 8000];
 
     function advance() {
       var now = Date.now();
+      var wasVisibleConfirmed = visibleMilliseconds >= visibleTarget;
       if (isVisible && now > lastTick) {
         visibleMilliseconds += now - lastTick;
+      }
+      if (!wasVisibleConfirmed && visibleMilliseconds >= visibleTarget) {
+        retryAttempts = 0;
+        retryExhausted = false;
       }
       lastTick = now;
     }
 
     function transmit(useBeacon) {
       var visibleConfirmed = visibleMilliseconds >= visibleTarget;
-      if ((!visibleConfirmed || visibleSent) && (!interactionMask || interactionSent)) {
+      var hasVisibleUpdate = visibleConfirmed && !visibleAcknowledged;
+      var hasInteractionUpdate = (interactionMask & ~interactionAcknowledged) !== 0;
+      if ((!hasVisibleUpdate && !hasInteractionUpdate) || requestInFlight || (retryExhausted && !useBeacon)) {
         return;
       }
 
@@ -259,20 +272,22 @@
         visible_confirmed: visibleConfirmed,
         interaction_mask: interactionMask
       });
-      if (visibleConfirmed) {
-        visibleSent = true;
-      }
-      if (interactionMask) {
-        interactionSent = true;
-      }
-
       if (useBeacon && navigator.sendBeacon) {
         var blob = new Blob([payload], { type: 'application/json' });
         if (navigator.sendBeacon(endpoint, blob)) {
+          // sendBeacon has no response. Keep the state unacknowledged so a bfcache
+          // restore can retry it; duplicate signals are idempotent on the server.
           return;
         }
       }
 
+      if (retryExhausted) {
+        return;
+      }
+
+      requestInFlight = true;
+      var sentVisible = visibleConfirmed;
+      var sentInteractions = interactionMask;
       window.fetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
@@ -280,13 +295,46 @@
         keepalive: true,
         headers: { 'Content-Type': 'application/json' },
         body: payload
+      }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('shadow_signal_http_' + response.status);
+        }
+        return response.json().catch(function () { return { accepted: true }; });
+      }).then(function (data) {
+        if (data && data.accepted === false) {
+          throw new Error('shadow_signal_rejected');
+        }
+        if (sentVisible) {
+          visibleAcknowledged = true;
+        }
+        interactionAcknowledged |= sentInteractions;
+        requestInFlight = false;
+        retryAttempts = 0;
+        retryScheduled = false;
+        retryExhausted = false;
+        transmit(false);
       }).catch(function () {
-        // Shadow diagnostics must never interrupt the visitor experience.
+        requestInFlight = false;
+        if (retryAttempts >= MAX_RETRIES || retryScheduled) {
+          retryExhausted = retryAttempts >= MAX_RETRIES;
+          return;
+        }
+        retryScheduled = true;
+        var delay = RETRY_DELAYS[Math.min(retryAttempts, RETRY_DELAYS.length - 1)];
+        retryAttempts += 1;
+        window.setTimeout(function () {
+          retryScheduled = false;
+          transmit(false);
+        }, delay);
       });
     }
 
     function markInteraction(flag) {
       advance();
+      if ((interactionMask & flag) === 0) {
+        retryAttempts = 0;
+        retryExhausted = false;
+      }
       interactionMask |= flag;
       transmit(false);
     }
@@ -308,6 +356,9 @@
     window.addEventListener('pageshow', function () {
       isVisible = document.visibilityState !== 'hidden';
       lastTick = Date.now();
+      retryAttempts = 0;
+      retryExhausted = false;
+      transmit(false);
     });
 
     window.setInterval(function () {
@@ -318,14 +369,23 @@
 
   function send(forceNewSession) {
     var payload = {
+      collect_id: uuid(),
       visitor_id: getVisitorId(),
       session_id: getSessionId(Boolean(forceNewSession)),
       path: window.location.pathname,
       title: document.title || '',
       referrer: document.referrer || '',
       device_type: deviceType(),
-      webdriver: typeof navigator.webdriver === 'boolean' ? (navigator.webdriver ? 1 : 0) : -1
+      webdriver: typeof navigator.webdriver === 'boolean' ? (navigator.webdriver ? 1 : 0) : -1,
+      tracker_build: String(window.aapTracker.build || 'unknown')
     };
+
+    transmitCollect(payload, Boolean(forceNewSession), 0);
+  }
+
+  function transmitCollect(payload, forceNewSession, retryAttempt) {
+    var MAX_COLLECT_RETRIES = 3;
+    var COLLECT_RETRY_DELAYS = [1000, 3000, 8000];
 
     window.fetch(window.aapTracker.endpoint, {
       method: 'POST',
@@ -341,7 +401,9 @@
       }
 
       if (!response.ok) {
-        return null;
+        var error = new Error('collect_http_' + response.status);
+        error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+        throw error;
       }
 
       return response.json();
@@ -350,8 +412,16 @@
         beginEngagement(data.engagement_token);
         beginShadowDiagnostics(data.engagement_token);
       }
-    }).catch(function () {
-      // Analytics must never interrupt the visitor experience.
+    }).catch(function (error) {
+      var retryable = !error || error.retryable !== false;
+      if (!retryable || retryAttempt >= MAX_COLLECT_RETRIES) {
+        return;
+      }
+      window.setTimeout(function () {
+        // Keep the same IDs across retries so a temporary failure cannot create
+        // several synthetic visitors.
+        transmitCollect(payload, forceNewSession, retryAttempt + 1);
+      }, COLLECT_RETRY_DELAYS[Math.min(retryAttempt, COLLECT_RETRY_DELAYS.length - 1)]);
     });
   }
 

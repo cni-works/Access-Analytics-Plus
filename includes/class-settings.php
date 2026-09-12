@@ -153,13 +153,19 @@ final class Settings {
 		$retention      = in_array( $retention, array( 90, 180, 365 ), true ) ? $retention : 90;
 		$sample_scale   = self::sample_scale();
 		$shadow_enabled = Shadow_Diagnostics::enabled();
-		$shadow_summary = $shadow_enabled ? Shadow_Diagnostics::summary() : array( 'total' => 0, 'human_like' => 0, 'unconfirmed' => 0, 'suspected' => 0, 'signals' => array(), 'reasons' => array(), 'ips' => array() );
+		$shadow_summary = $shadow_enabled ? Shadow_Diagnostics::summary() : array( 'total' => 0, 'human_like' => 0, 'unconfirmed' => 0, 'suspected' => 0, 'geo_excluded' => 0, 'build_mismatch' => 0, 'promotion_failures' => 0, 'signals' => array(), 'reasons' => array(), 'ips' => array(), 'builds' => array(), 'countries' => array(), 'errors' => array() );
 		$country_mode = self::country_mode();
 		$allowed_countries = implode( ', ', self::allowed_countries() );
 		$geoip_status = GeoIP_Database::status();
+		$region_status = Region_Database::status();
+		$collect_failure = Shadow_Diagnostics::last_collect_failure();
 		$geoip_update_url = wp_nonce_url(
 			add_query_arg( 'action', 'aap_update_geoip', admin_url( 'admin-post.php' ) ),
 			'aap_update_geoip'
+		);
+		$region_update_url = wp_nonce_url(
+			add_query_arg( 'action', 'aap_update_region_database', admin_url( 'admin-post.php' ) ),
+			'aap_update_region_database'
 		);
 		$invalid_count  = isset( $_GET['invalid_ips'] ) ? absint( $_GET['invalid_ips'] ) : 0;
 		?>
@@ -168,6 +174,12 @@ final class Settings {
 			<?php if ( isset( $_GET['updated'] ) ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( '設定を保存しました。', 'access-analytics-plus' ); ?></p></div>
 			<?php endif; ?>
+			<?php if ( false !== get_option( 'aap_db_schema_error', false ) ) : ?>
+				<div class="notice notice-error"><p><?php esc_html_e( 'アクセス解析のDB更新が完了していません。現在のDB Versionは更新されていません。開発者向け診断を確認してください。', 'access-analytics-plus' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( $collect_failure ) : ?>
+				<div class="notice notice-error"><p><?php esc_html_e( 'アクセスの仮保存に失敗した記録があります。下の「自動アクセス診断」で詳細を確認してください。', 'access-analytics-plus' ); ?></p></div>
+			<?php endif; ?>
 			<?php if ( $invalid_count > 0 ) : ?>
 				<div class="notice notice-warning"><p><?php echo esc_html( sprintf( __( '正しくないIPアドレスを%d件追加しませんでした。', 'access-analytics-plus' ), $invalid_count ) ); ?></p></div>
 			<?php endif; ?>
@@ -175,6 +187,9 @@ final class Settings {
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( '国判定データを更新しました。', 'access-analytics-plus' ); ?></p></div>
 			<?php elseif ( isset( $_GET['geoip_update'] ) && 'error' === sanitize_key( wp_unslash( (string) $_GET['geoip_update'] ) ) ) : ?>
 				<div class="notice notice-warning"><p><?php esc_html_e( '国判定データを更新できませんでした。既存または同梱データで国判定を継続します。', 'access-analytics-plus' ); ?></p></div>
+			<?php endif; ?>
+			<?php if ( isset( $_GET['region_update'] ) ) : ?>
+				<div class="notice <?php echo 'success' === sanitize_key( wp_unslash( (string) $_GET['region_update'] ) ) ? 'notice-success' : 'notice-warning'; ?> is-dismissible"><p><?php echo esc_html( 'success' === sanitize_key( wp_unslash( (string) $_GET['region_update'] ) ) ? __( '都道府県データを更新しました。', 'access-analytics-plus' ) : __( '都道府県データを更新できませんでした。既存または同梱データで判定を継続します。', 'access-analytics-plus' ) ); ?></p></div>
 			<?php endif; ?>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -242,18 +257,39 @@ final class Settings {
 						<a class="button button-secondary" href="<?php echo esc_url( $geoip_update_url ); ?>"><?php esc_html_e( '今すぐ更新', 'access-analytics-plus' ); ?></a>
 						<p class="description"><?php esc_html_e( 'DB-IP Country Liteを利用しています。データベースはCC BY 4.0で提供され、IPから国コードだけを判定します。生のIPアドレスは解析データとして保存しません。', 'access-analytics-plus' ); ?> <a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">DB-IP</a> / <a href="<?php echo esc_url( GeoIP_Database::LICENSE_URL ); ?>" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></p>
 					</div>
+					<div class="aap-geoip-status">
+						<h3><?php esc_html_e( '日本国内の都道府県データ', 'access-analytics-plus' ); ?></h3>
+						<dl>
+							<div><dt><?php esc_html_e( 'データソース', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $region_status['source'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( 'データ版', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $region_status['edition'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( '最終更新', 'access-analytics-plus' ); ?></dt><dd><?php echo esc_html( $region_status['last_updated'] ); ?></dd></div>
+							<div><dt><?php esc_html_e( '状態', 'access-analytics-plus' ); ?></dt><dd class="is-<?php echo esc_attr( $region_status['status_level'] ); ?>"><?php echo esc_html( $region_status['status'] ); ?></dd></div>
+						</dl>
+						<?php if ( $region_status['feed_available'] ) : ?><a class="button button-secondary" href="<?php echo esc_url( $region_update_url ); ?>"><?php esc_html_e( '今すぐ更新', 'access-analytics-plus' ); ?></a><?php else : ?><button type="button" class="button button-secondary" disabled><?php esc_html_e( '更新フィード準備中', 'access-analytics-plus' ); ?></button><?php endif; ?>
+						<p class="description"><?php esc_html_e( 'DB-IP City Lite 2026-09版から、日本だけを抽出・都道府県コードへ正規化・連続範囲を統合した派生MMDBです。CC BY 4.0で提供され、都道府県分析だけに利用します。生IPは保存しません。', 'access-analytics-plus' ); ?> <a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">DB-IP</a> / <a href="<?php echo esc_url( GeoIP_Database::LICENSE_URL ); ?>" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></p>
+					</div>
 				</section>
 
 				<details class="aap-settings-card aap-shadow-diagnostics">
 					<summary><?php esc_html_e( '自動アクセス診断（直近7日）', 'access-analytics-plus' ); ?></summary>
 					<p class="description"><?php esc_html_e( '新しいアクセスは、3秒の表示または操作・閲覧時間送信を確認してから通常集計へ反映します。匿名化した診断情報は7日後に削除します。', 'access-analytics-plus' ); ?></p>
 					<?php if ( $shadow_enabled ) : ?>
+						<?php if ( $collect_failure ) : ?>
+							<h3><?php esc_html_e( '直近の仮保存エラー', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list"><li>
+								<span><?php echo esc_html( sprintf( '%1$s / %2$s / DB %3$s / Tracker %4$s', (string) ( $collect_failure['time'] ?? '' ), (string) ( $collect_failure['type'] ?? '' ), (string) ( $collect_failure['db_version'] ?? '' ), (string) ( $collect_failure['tracker_build'] ?? '' ) ) ); ?></span>
+								<strong><?php echo esc_html( '' !== (string) ( $collect_failure['message'] ?? '' ) ? (string) $collect_failure['message'] : __( 'DBエラー詳細なし', 'access-analytics-plus' ) ); ?></strong>
+							</li></ul>
+							<p class="description"><?php echo esc_html( ! empty( $collect_failure['repair_attempted'] ) ? __( 'DBスキーマの自己修復を試行しました。', 'access-analytics-plus' ) : __( '同時実行を避けるため、DBスキーマの自己修復はこの要求では実行されませんでした。', 'access-analytics-plus' ) ); ?></p>
+						<?php endif; ?>
 						<div class="aap-shadow-summary">
 							<div><span><?php esc_html_e( '診断対象アクセス', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['total'] ) ); ?></strong></div>
 							<div><span><?php esc_html_e( '人間らしい挙動あり', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['human_like'] ) ); ?></strong></div>
 							<div><span><?php esc_html_e( '未確認', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['unconfirmed'] ) ); ?></strong></div>
 							<div><span><?php esc_html_e( 'Bot疑い', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['suspected'] ) ); ?></strong></div>
 							<div><span><?php esc_html_e( '地域設定による対象外', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['geo_excluded'] ?? 0 ) ); ?></strong></div>
+							<div><span><?php esc_html_e( '旧Tracker Build', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['build_mismatch'] ?? 0 ) ); ?></strong></div>
+							<div><span><?php esc_html_e( '昇格エラー記録', 'access-analytics-plus' ); ?></span><strong><?php echo esc_html( number_format_i18n( $shadow_summary['promotion_failures'] ?? 0 ) ); ?></strong></div>
 						</div>
 						<p class="description"><?php esc_html_e( '記録直後の判定待ちは「未確認」に含まれます。確認済みだけを通常のPV・訪問者として集計し、既存データは変更しません。', 'access-analytics-plus' ); ?></p>
 						<?php if ( $shadow_summary['total'] > 0 ) : ?>
@@ -273,10 +309,30 @@ final class Settings {
 								<?php foreach ( $shadow_summary['reasons'] as $reason ) : ?><li><span><?php echo esc_html( $reason['label'] ); ?></span><strong><?php echo esc_html( number_format_i18n( $reason['value'] ) ); ?></strong></li><?php endforeach; ?>
 							</ul>
 						<?php endif; ?>
+						<?php if ( ( $shadow_summary['build_mismatch'] ?? 0 ) > 0 && ( $shadow_summary['builds'] ?? array() ) ) : ?>
+							<h3><?php esc_html_e( '受信したTracker Build', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<?php foreach ( $shadow_summary['builds'] as $build_row ) : ?><li><span><?php echo esc_html( (string) $build_row['tracker_build'] ); ?></span><strong><?php echo esc_html( sprintf( '%1$s件%2$s', number_format_i18n( (int) $build_row['total'] ), (int) $build_row['build_mismatch'] === 1 ? __( '（現行と不一致）', 'access-analytics-plus' ) : '' ) ); ?></strong></li><?php endforeach; ?>
+							</ul>
+						<?php endif; ?>
+						<?php if ( $shadow_summary['countries'] ?? array() ) : ?>
+							<h3><?php esc_html_e( '国判定の内訳', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<?php foreach ( $shadow_summary['countries'] as $country_row ) : ?><li><span><?php echo esc_html( sprintf( '%1$s / %2$s', (string) $country_row['country_code'], (string) $country_row['country_source'] ) ); ?></span><strong><?php echo esc_html( sprintf( __( '%1$s件（地域対象外 %2$s件）', 'access-analytics-plus' ), number_format_i18n( (int) $country_row['total'] ), number_format_i18n( (int) $country_row['excluded'] ) ) ); ?></strong></li><?php endforeach; ?>
+							</ul>
+						<?php endif; ?>
 						<?php if ( $shadow_summary['ips'] ) : ?>
 							<h3><?php esc_html_e( 'アクセスが多い匿名IP識別子', 'access-analytics-plus' ); ?></h3>
 							<ul class="aap-shadow-list">
 								<?php foreach ( $shadow_summary['ips'] as $ip_row ) : ?><li><span><?php echo esc_html( sprintf( __( '匿名IP %s', 'access-analytics-plus' ), $ip_row['key'] ) ); ?></span><strong><?php echo esc_html( sprintf( __( '%1$sアクセス / %2$s visitor ID / 表示%3$s / 閲覧送信%4$s / webdriver%5$s / Bot疑い%6$s', 'access-analytics-plus' ), number_format_i18n( $ip_row['total'] ), number_format_i18n( $ip_row['visitors'] ), number_format_i18n( $ip_row['visible'] ), number_format_i18n( $ip_row['engagement'] ), number_format_i18n( $ip_row['webdriver'] ), number_format_i18n( $ip_row['suspected'] ) ) ); ?></strong></li><?php endforeach; ?>
+							</ul>
+						<?php endif; ?>
+						<?php if ( $shadow_summary['errors'] ?? array() ) : ?>
+							<h3><?php esc_html_e( '直近の昇格エラー', 'access-analytics-plus' ); ?></h3>
+							<ul class="aap-shadow-list">
+								<?php foreach ( $shadow_summary['errors'] as $error_row ) : ?>
+									<li><span><?php echo esc_html( sprintf( '%1$s / 完了:%2$s / 失敗:%3$s / %4$s', (string) $error_row['last_error_at'], (string) $error_row['last_completed_stage'], (string) $error_row['last_error_stage'], (string) $error_row['last_error_type'] ) ); ?></span><strong><?php echo esc_html( '' !== (string) $error_row['last_error_message'] ? (string) $error_row['last_error_message'] : __( 'DBエラー詳細なし', 'access-analytics-plus' ) ); ?></strong></li>
+								<?php endforeach; ?>
 							</ul>
 						<?php endif; ?>
 					<?php else : ?>
