@@ -124,6 +124,11 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <section class="aap-panel aap-chart-panel"><span data-aap-updated></span><div data-aap-chart></div><details class="aap-timeseries-disclosure" data-aap-timeseries-disclosure open><summary>日ごとの数字を見る</summary><div data-aap-timeseries-list></div></details></section>
   <div class="aap-grid"><section class="aap-panel"><div data-aap-sources></div><div data-aap-source-details></div></section><section class="aap-panel"><div data-aap-pages></div></section></div>
   <section class="aap-panel aap-region-panel"><div data-aap-regions></div><p class="aap-region-note">推定値です</p></section>
+  <section class="aap-panel aap-search-console" data-aap-search-console data-range="28d">
+    <div class="aap-section-heading"><h2>Google検索キーワード <span class="aap-experimental-badge">試験機能</span></h2><span data-aap-search-console-version></span></div>
+    <nav class="aap-search-periods"><button data-search-range="7d">7日</button><button data-search-range="28d" class="is-active">28日</button><button data-search-range="3m">3か月</button></nav>
+    <div class="aap-search-console-status" data-aap-search-console-status></div><div data-aap-search-console-rows></div><p data-aap-search-console-note></p>
+  </section>
   <section class="aap-panel"><div data-aap-devices></div></section>
   <details data-aap-exclusions><strong data-aap-exclusions-total></strong><div data-aap-exclusion-items></div></details>
 </div>
@@ -144,11 +149,43 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage({ viewport: { width: 375, height: 900 } });
   const requests = [];
+  let searchConsoleMode = 'ready';
   await page.route('https://example.test/**', async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname.includes('/wp-json/access-analytics-plus/v1/search-console/report')) {
+      requests.push(url.href);
+      if (searchConsoleMode === 'schema_error') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          status: 'schema_error', message: 'Site Kitから受け取った検索データの形式を確認できませんでした。',
+          site_kit: { installed: true, active: true, version: '1.187.0', compatibility: 'verified' },
+          rows: [], diagnostic: { top_level_type: 'array', row_type: 'object', row_count: 20, schema_result: 'invalid_row' },
+        }) });
+        return;
+      }
+      if (searchConsoleMode === 'temporary_error') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          status: 'temporary_error', message: 'Google検索データを一時的に取得できませんでした。時間をおいて再度お試しください。',
+          site_kit: { installed: true, active: true, version: '1.187.0', compatibility: 'verified' },
+          rows: [], diagnostic: { top_level_type: 'not_received', row_type: 'not_received', row_count: 0, schema_result: 'not_evaluated' },
+        }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        status: 'ready', message: '', experimental: true, dimension: 'query',
+        site_kit: { installed: true, active: true, version: '1.186.0', compatibility: 'verified' },
+        period: { key: url.searchParams.get('range') || '28d', start: '2026-08-15', end: '2026-09-11' },
+        rows: Array.from({ length: 7 }, (_, index) => ({
+          query: index === 0 ? '屋根修理 武蔵村山' : `検索キーワード${index + 1}`,
+          clicks: 4 - Math.min(index, 3), impressions: 80 - index * 5, ctr: 0.05, position: 6.2 + index,
+        })),
+        cache: { hit: false, ttl_seconds: 7200 }, fetched_at: '2026-09-12T12:00:00+09:00',
+      }) });
+      return;
+    }
     if (url.pathname.includes('/wp-json/access-analytics-plus/v1/report')) {
       requests.push(url.href);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(reportFor(url)) });
+      const reportResponse = reportFor(url);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(reportResponse) });
       return;
     }
     await route.fulfill({ status: 200, contentType: 'text/html', body: html });
@@ -158,6 +195,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   await page.evaluate((value) => {
     window.aapAdmin = {
       reportEndpoint: '/wp-json/access-analytics-plus/v1/report',
+      searchConsoleEndpoint: '/wp-json/access-analytics-plus/v1/search-console/report',
       nonce: 'test',
       today: value,
       strings: { loading: '読み込み中…', error: 'エラー', empty: 'データなし' },
@@ -167,12 +205,44 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
 
   const report = page.locator('.aap-wrap');
   const widget = page.locator('.aap-widget');
+  const searchConsole = report.locator('[data-aap-search-console]');
 
   await page.locator('[data-aap-period-label]').filter({ hasText: '2026年8月27日' }).waitFor();
   assert.equal(await report.getAttribute('data-period-mode'), 'day', 'full report defaults to today');
   assert.equal(await report.locator('[data-range="today"]').evaluate((node) => node.classList.contains('is-active')), true, 'today tab is initially active');
   assert.equal(await report.locator('.aap-chart-hit').count(), 24, 'initial report uses hourly data');
-  await report.getByText('7日', { exact: true }).click();
+  await searchConsole.getByText('屋根修理 武蔵村山', { exact: true }).waitFor();
+  assert.match(await searchConsole.innerText(), /表示\s*80/);
+  assert.match(await searchConsole.innerText(), /クリック\s*4/);
+  assert.match(await searchConsole.innerText(), /CTR\s*5%/);
+  assert.match(await searchConsole.innerText(), /平均順位\s*6\.2/);
+  assert.equal(await searchConsole.locator('.aap-search-keywords li:not([hidden])').count(), 5, 'Search Console initially shows five rows');
+  assert.equal(await searchConsole.locator('.aap-search-keywords li[hidden]').count(), 2, 'remaining Search Console rows start collapsed');
+  const keywordToggle = searchConsole.locator('.aap-search-keywords-toggle');
+  assert.equal(await keywordToggle.getAttribute('aria-expanded'), 'false');
+  assert.equal(await keywordToggle.innerText(), 'もっと見る（残り2件）');
+  await keywordToggle.click();
+  assert.equal(await searchConsole.locator('.aap-search-keywords li:not([hidden])').count(), 7, 'Search Console expands all fetched rows');
+  assert.equal(await keywordToggle.getAttribute('aria-expanded'), 'true');
+  assert.equal(await keywordToggle.innerText(), '閉じる');
+  await keywordToggle.click();
+  assert.equal(await searchConsole.locator('.aap-search-keywords li:not([hidden])').count(), 5, 'Search Console collapses back to five rows');
+  assert.equal(await searchConsole.locator('[data-search-range="28d"]').getAttribute('aria-pressed'), 'true');
+  await searchConsole.locator('[data-search-range="7d"]').click();
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.aap-search-console [data-search-range]')).some((node) => node.dataset.searchRange === '7d' && node.getAttribute('aria-pressed') === 'true'));
+  assert.ok(requests.some((url) => url.includes('/search-console/report?range=7d')), 'Search Console period changes through the AAP adapter');
+  searchConsoleMode = 'schema_error';
+  await searchConsole.locator('[data-search-range="3m"]').click();
+  await searchConsole.locator('.aap-search-console-status.is-schema_error').waitFor();
+  assert.match(await searchConsole.locator('[data-aap-search-console-status]').innerText(), /形式/);
+  assert.match(await searchConsole.locator('[data-aap-search-console-note]').innerText(), /top-level=array \/ row=object \/ rows=20 \/ schema=invalid_row/);
+  searchConsoleMode = 'temporary_error';
+  await searchConsole.locator('[data-search-range="28d"]').click();
+  await searchConsole.locator('.aap-search-console-status.is-temporary_error').waitFor();
+  assert.match(await searchConsole.locator('[data-aap-search-console-status]').innerText(), /一時的/);
+  assert.match(await searchConsole.locator('[data-aap-search-console-note]').innerText(), /schema=not_evaluated/);
+  searchConsoleMode = 'ready';
+  await report.locator('.aap-periods [data-range="7d"]').click();
   await page.locator('[data-aap-period-label]').filter({ hasText: '2026/08/21 〜 2026/08/27' }).waitFor();
   assert.equal(await report.locator('[data-aap-calendar-date]').count(), 14);
   assert.equal(await report.locator('.aap-chart-bar').count(), 14, 'two bars per day');
@@ -232,7 +302,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   for (let month = 0; month < 23; month++) await report.locator('[data-aap-calendar-month="-1"]').click();
   assert.match(await report.locator('.aap-calendar-heading strong').innerText(), /2024年2月/);
   assert.equal(await report.locator('[data-aap-calendar-date]').count(), 29, 'leap February has 29 dates');
-  await report.getByText('7日', { exact: true }).click();
+  await report.locator('.aap-periods [data-range="7d"]').click();
   await report.locator('[data-aap-calendar-date="2026-08-27"]').waitFor();
   assert.equal(await report.locator('.aap-timeseries-row').first().isVisible(), true, 'details start visible');
   await report.locator('[data-aap-timeseries-disclosure] summary').click();
@@ -300,7 +370,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   await report.locator('[data-aap-timeseries-disclosure] summary').evaluate((node) => { node.parentElement.open = true; });
   assert.equal(await page.locator('.aap-timeseries-heading h3').innerText(), '日別アクセス');
 
-  await report.getByText('7日', { exact: true }).click();
+  await report.locator('.aap-periods [data-range="7d"]').click();
   await page.locator('.aap-timeseries-row').first().click();
   await page.locator('.aap-timeseries-heading h3').filter({ hasText: '時間別アクセス' }).waitFor();
   assert.match(await report.locator('[data-aap-back-to-period]').innerText(), /2026\/08\/21〜2026\/08\/27/);
@@ -362,7 +432,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   await widget.locator('[data-range="today"]').click();
   await widget.locator('.aap-chart-empty').waitFor();
   assert.equal(await widget.locator('svg').count(), 0, 'zero traffic does not render a misleading empty chart');
-  await report.getByText('7日', { exact: true }).click();
+  await report.locator('.aap-periods [data-range="7d"]').click();
   await report.locator('.aap-chart-empty').waitFor();
   assert.equal(await report.locator('[data-aap-timeseries-disclosure] summary').innerText(), '日ごとの数字・時間別への切り替え');
   await report.locator('[data-aap-timeseries-disclosure] summary').click();

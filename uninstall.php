@@ -71,5 +71,8 @@ delete_option( 'aap_confirmation_started_at' );
 delete_option( 'aap_region_tracking_started_at' );
 delete_option( 'aap_region_database_state' );
 delete_option( 'aap_region_database_last_check' );
+delete_option( 'aap_ai_report_site_purpose' );
+delete_option( 'aap_ai_report_target_area' );
+delete_option( 'aap_ai_report_focus_services' );
 delete_transient( 'aap_confirmation_finalize_lock' );
 delete_option( 'aap_last_daily_rebuild' );

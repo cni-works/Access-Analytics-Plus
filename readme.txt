@@ -4,7 +4,7 @@ Tags: analytics, statistics, pageviews, dashboard
 Requires at least: 6.8
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.5.7-beta
+Stable tag: 0.5.8-beta
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,6 +26,45 @@ IP除外へ登録したアドレスは正規化後にハッシュ化し、生の
 確認済みアクセスの判定では、IPアドレスとUser-Agentを用途別のHMAC識別値へ変換し、国コード、端末分類、3秒の表示確認、操作の有無、閲覧時間送信の有無を最長7日間保存します。生のIPアドレス、User-Agent全文、クリック位置、入力内容は保存しません。確認できないアクセス、自動巡回、設定した対象国外アクセスは通常集計へ含めません。
 
 == Changelog ==
+
+= 0.5.8-beta / Build beta.20260913.8 =
+* レポートのダウンロードと、普段利用するAIへのファイル添付を別ステップに分離
+
+= 0.5.8-beta / Build beta.20260913.7 =
+* ダウンロードしたAI相談用レポートを、利用者自身のAIへ添付して使う手順を明記
+
+= 0.5.8-beta / Build beta.20260913.6 =
+* AI相談用レポートの入力例を、特定の業種や地域に依存しない汎用的な表現へ変更
+
+= 0.5.8-beta / Build beta.20260913.5 =
+* 既存の集計済み解析情報をMarkdownへ整理する「AI相談用レポート」V1を追加
+* 直近7日・28日・3か月・最大90日の期間指定、前期間比較、データ充足度表示に対応
+* Site Kit経由のSearch Console結果を任意で含め、取得できない場合もレポート本体は生成
+* 検索語句のメール・電話番号らしい値・長い数字をマスクし、外部由来データを指示として扱わない注意を追加
+* 生成前プレビューとnonce・権限確認付きMarkdownダウンロードを追加し、レポート本文は保存も外部送信もしない構成
+
+= 0.5.8-beta / Build beta.20260913.4 =
+* Site KitがインストールされていないサイトではGoogle検索キーワードカードを非表示化
+* Site Kit導入済みの場合だけ、接続状態や権限に応じた案内を表示
+
+= 0.5.8-beta / Build beta.20260913.3 =
+* Google検索キーワードを上位5件の初期表示と最大20件の開閉表示へ変更
+* スマートフォンでも押しやすい「もっと見る」「閉じる」操作を追加
+
+= 0.5.8-beta / Build beta.20260913.2 =
+* Site Kitの配列内にGoogle行オブジェクトが含まれるSearch Console応答を深く正規化
+* 通信失敗と応答形式エラーを分け、安全な型・行数・schema診断を追加
+* Site Kit 1.187.0相当の行オブジェクトFixtureによる回帰テストを追加
+
+= 0.5.8-beta / Build beta.20260913.1 =
+* Site Kit 1.187.0の汎用REST Routeを具体URLとの完全一致で誤判定する問題を修正
+* Search Console Routeの有無は実際の内部REST応答で判定するよう変更
+
+= 0.5.8-beta / Build beta.20260912.6 =
+* Google Site Kit経由でSearch Console検索キーワードを表示する試験機能を追加
+* Google TokenやSite Kit内部PHPクラスへ触れず、AAP Adapter RESTで取得結果だけを正規化
+* WordPressユーザー・期間・Site Kit Version別の2時間キャッシュとfail-safe表示を追加
+* Search Console用の長期DB保存、Cron同期、独自OAuthは行わない最小プロトタイプ
 
 = 0.5.7-beta / Build beta.20260912.5 =
 * 日本国内のconfirmedアクセスを都道府県別の一意な訪問者数で表示

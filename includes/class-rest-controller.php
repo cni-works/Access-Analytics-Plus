@@ -119,6 +119,23 @@ final class Rest_Controller {
 
 		register_rest_route(
 			self::NAMESPACE,
+			'/search-console/report',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( Search_Console_Service::class, 'rest_report' ),
+				'permission_callback' => static fn (): bool => current_user_can( Capabilities::VIEW ),
+				'args'                => array(
+					'range' => array(
+						'default' => '28d',
+						'type'    => 'string',
+						'enum'    => array( '7d', '28d', '3m' ),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
 			'/report',
 			array(
 				'methods'             => 'GET',

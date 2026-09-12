@@ -124,6 +124,11 @@ try {
 	if (@($entryNames | Where-Object { -not $_.StartsWith("$slug/") }).Count -gt 0) { $errors.Add("The top-level folder is not $slug.") }
 	if ($entryNames -notcontains "$slug/access-analytics-plus.php") { $errors.Add('The main plugin file is missing.') }
 	if ($entryNames -notcontains "$slug/includes/updater/class-github-release-updater.php") { $errors.Add('The GitHub updater is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-search-console-service.php") { $errors.Add('The Search Console Site Kit adapter is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-ai-report.php") { $errors.Add('The AI report payload builder is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-ai-report-markdown.php") { $errors.Add('The AI report Markdown renderer is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-ai-report-admin.php") { $errors.Add('The AI report admin controller is missing.') }
+	if ($entryNames -notcontains "$slug/assets/js/ai-report.js") { $errors.Add('The AI report admin script is missing.') }
 	if ($entryNames -notcontains "$slug/data/dbip-country-lite-2026-09.mmdb") { $errors.Add('The bundled DB-IP Country Lite database is missing.') }
 	if ($entryNames -notcontains "$slug/data/aap-japan-prefecture-2026-09.mmdb") { $errors.Add('The bundled Japan prefecture database is missing.') }
 	if ($entryNames -notcontains "$slug/data/aap-japan-prefecture-2026-09.manifest.json") { $errors.Add('The Japan prefecture data manifest is missing.') }

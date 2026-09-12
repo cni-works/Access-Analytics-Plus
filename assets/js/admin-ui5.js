@@ -856,6 +856,121 @@
     target.appendChild(list);
   }
 
+  function renderSearchConsole(container, data) {
+	var status = container.querySelector('[data-aap-search-console-status]');
+	var target = container.querySelector('[data-aap-search-console-rows]');
+	var note = container.querySelector('[data-aap-search-console-note]');
+	var version = container.querySelector('[data-aap-search-console-version]');
+	clear(target);
+	container.classList.toggle('has-warning', data.site_kit && data.site_kit.compatibility === 'unverified');
+	if (version) version.textContent = data.site_kit && data.site_kit.version ? 'Site Kit ' + data.site_kit.version : '';
+	if (data.status !== 'ready') {
+	  status.hidden = false;
+	  status.className = 'aap-search-console-status is-' + (data.status || 'temporary_error');
+	  status.textContent = data.message || 'Google検索データを取得できませんでした。';
+	  if (note) {
+		var notes = [];
+		if (data.site_kit && data.site_kit.compatibility === 'unverified') notes.push('このSite Kit Versionは未確認です。取得機能だけを試験的に実行しています。');
+		if (data.diagnostic) {
+		  notes.push('開発者診断: top-level=' + String(data.diagnostic.top_level_type || 'unknown')
+			+ ' / row=' + String(data.diagnostic.row_type || 'unknown')
+			+ ' / rows=' + number.format(Number(data.diagnostic.row_count) || 0)
+			+ ' / schema=' + String(data.diagnostic.schema_result || 'not_evaluated'));
+		}
+		note.textContent = notes.join(' ');
+	  }
+	  return;
+	}
+
+	status.className = 'aap-search-console-status is-ready';
+	status.textContent = data.rows.length ? '' : 'この期間に表示できる検索キーワードはありません。';
+	status.hidden = data.rows.length > 0;
+	var list = document.createElement('ol');
+	list.className = 'aap-search-keywords';
+	data.rows.forEach(function (row, index) {
+	  var item = document.createElement('li');
+	  if (index >= 5) item.hidden = true;
+	  var query = document.createElement('strong');
+	  query.textContent = row.query;
+	  var metrics = document.createElement('dl');
+	  [
+		['表示', number.format(row.impressions)],
+		['クリック', number.format(row.clicks)],
+		['CTR', number.format(Math.round(row.ctr * 1000) / 10) + '%'],
+		['平均順位', number.format(Math.round(row.position * 10) / 10)]
+	  ].forEach(function (entry) {
+		var group = document.createElement('div');
+		var label = document.createElement('dt');
+		label.textContent = entry[0];
+		var value = document.createElement('dd');
+		value.textContent = entry[1];
+		group.append(label, value);
+		metrics.appendChild(group);
+	  });
+	  item.append(query, metrics);
+	  list.appendChild(item);
+	});
+	target.appendChild(list);
+	if (data.rows.length > 5) {
+	  var toggle = document.createElement('button');
+	  toggle.type = 'button';
+	  toggle.className = 'button-link aap-search-keywords-toggle';
+	  toggle.setAttribute('aria-expanded', 'false');
+	  toggle.textContent = 'もっと見る（残り' + number.format(data.rows.length - 5) + '件）';
+	  toggle.addEventListener('click', function () {
+		var expanded = toggle.getAttribute('aria-expanded') === 'true';
+		list.querySelectorAll('li').forEach(function (item, index) {
+		  item.hidden = expanded && index >= 5;
+		});
+		toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+		toggle.textContent = expanded ? 'もっと見る（残り' + number.format(data.rows.length - 5) + '件）' : '閉じる';
+	  });
+	  target.appendChild(toggle);
+	}
+	if (note) {
+	  var fetched = data.fetched_at ? new Date(data.fetched_at).toLocaleString('ja-JP') : '';
+	  var parts = ['Site Kit経由', data.period.start + '〜' + data.period.end];
+	  if (fetched) parts.push('取得 ' + fetched);
+	  if (data.cache && data.cache.hit) parts.push('キャッシュ');
+	  if (data.site_kit && data.site_kit.compatibility === 'unverified') parts.push('未確認Version');
+	  note.textContent = parts.join(' ・ ');
+	}
+  }
+
+  function loadSearchConsole(container) {
+	if (!window.aapAdmin.searchConsoleEndpoint) return;
+	var status = container.querySelector('[data-aap-search-console-status]');
+	if (status) {
+	  status.hidden = false;
+	  status.className = 'aap-search-console-status is-loading';
+	  status.textContent = 'Site Kitとの接続を確認しています…';
+	}
+	if (container.aapSearchRequestController) container.aapSearchRequestController.abort();
+	container.aapSearchRequestController = new AbortController();
+	var params = new URLSearchParams({ range: container.dataset.range || '28d' });
+	window.fetch(window.aapAdmin.searchConsoleEndpoint + '?' + params.toString(), {
+	  credentials: 'same-origin',
+	  cache: 'no-store',
+	  headers: { 'X-WP-Nonce': window.aapAdmin.nonce },
+	  signal: container.aapSearchRequestController.signal
+	}).then(function (response) {
+	  return response.json().then(function (data) {
+		if (!response.ok) throw new Error(data.message || 'Google検索データを取得できませんでした。');
+		return data;
+	  });
+	}).then(function (data) {
+	  renderSearchConsole(container, data);
+	}).catch(function (error) {
+	  if (error.name === 'AbortError') return;
+	  clear(container.querySelector('[data-aap-search-console-rows]'));
+	  if (status) {
+		status.hidden = false;
+		status.className = 'aap-search-console-status is-temporary_error';
+		status.textContent = error.message || 'Google検索データを取得できませんでした。';
+	  }
+	});
+  }
+
   function load(container) {
     var status = container.querySelector('[data-aap-status]');
     var range = container.dataset.range || '7d';
@@ -966,6 +1081,22 @@
 	  dayPicker.hidden = true;
 	});
     load(container);
+  });
+
+  document.querySelectorAll('[data-aap-search-console]').forEach(function (container) {
+	container.querySelectorAll('[data-search-range]').forEach(function (button) {
+	  button.setAttribute('aria-pressed', button.classList.contains('is-active') ? 'true' : 'false');
+	  button.addEventListener('click', function () {
+		container.dataset.range = button.dataset.searchRange;
+		container.querySelectorAll('[data-search-range]').forEach(function (candidate) {
+		  var active = candidate === button;
+		  candidate.classList.toggle('is-active', active);
+		  candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
+		});
+		loadSearchConsole(container);
+	  });
+	});
+	loadSearchConsole(container);
   });
 
   var toggle = document.querySelector('[data-aap-mobile-toggle]');

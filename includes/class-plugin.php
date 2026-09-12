@@ -15,6 +15,7 @@ final class Plugin {
 		Tracker::register();
 		Rest_Controller::register();
 		Admin::register();
+		AI_Report_Admin::register();
 		Settings::register();
 		Dashboard_Widget::register();
 	}

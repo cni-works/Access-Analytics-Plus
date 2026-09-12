@@ -28,7 +28,8 @@ final class Admin {
 		$is_report    = 'toplevel_page_' . self::PAGE_SLUG === $hook_suffix;
 		$is_dashboard = 'index.php' === $hook_suffix;
 		$is_settings  = str_ends_with( $hook_suffix, '_page_' . Settings::PAGE_SLUG );
-		if ( ! $is_report && ! $is_dashboard && ! $is_settings ) {
+		$is_ai_report = str_ends_with( $hook_suffix, '_page_' . AI_Report_Admin::PAGE_SLUG );
+		if ( ! $is_report && ! $is_dashboard && ! $is_settings && ! $is_ai_report ) {
 			return;
 		}
 
@@ -37,6 +38,10 @@ final class Admin {
 			'aap-admin',
 			'@media (max-width:782px){.aap-grid{grid-template-columns:minmax(0,1fr)!important}.aap-grid>.aap-panel{box-sizing:border-box;max-width:100%;min-width:0;overflow:hidden;width:100%}}'
 		);
+		if ( $is_ai_report ) {
+			wp_enqueue_script( 'aap-ai-report', AAP_PLUGIN_URL . 'assets/js/ai-report.js', array(), AAP_VERSION . '.' . AAP_BUILD, true );
+			return;
+		}
 		if ( $is_settings ) {
 			return;
 		}
@@ -52,6 +57,7 @@ final class Admin {
 			'aapAdmin',
 			array(
 				'reportEndpoint' => esc_url_raw( rest_url( 'access-analytics-plus/v1/report' ) ),
+				'searchConsoleEndpoint' => esc_url_raw( rest_url( 'access-analytics-plus/v1/search-console/report' ) ),
 				'nonce'          => wp_create_nonce( 'wp_rest' ),
 				'analyticsUrl'   => esc_url_raw( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ),
 				'today'          => current_datetime()->format( 'Y-m-d' ),
@@ -68,7 +74,8 @@ final class Admin {
 		if ( ! current_user_can( Capabilities::VIEW ) ) {
 			wp_die( esc_html__( 'このページを表示する権限がありません。', 'access-analytics-plus' ) );
 		}
-		$today = current_datetime()->format( 'Y-m-d' );
+		$today                   = current_datetime()->format( 'Y-m-d' );
+		$site_kit_is_installed   = Search_Console_Service::is_site_kit_installed();
 		?>
 		<div class="wrap aap-wrap" data-aap-report data-range="today" data-period-mode="day">
 			<header class="aap-header">
@@ -80,6 +87,7 @@ final class Admin {
 					<span class="aap-sample-badge" data-aap-sample-badge hidden><?php esc_html_e( 'サンプルデータ表示中', 'access-analytics-plus' ); ?></span>
 					<span class="aap-measurement-state <?php echo Settings::tracking_enabled() ? 'is-active' : 'is-stopped'; ?>"><?php echo esc_html( Settings::tracking_enabled() ? __( '計測中', 'access-analytics-plus' ) : __( '計測停止中', 'access-analytics-plus' ) ); ?></span>
 					<?php if ( current_user_can( Capabilities::MANAGE ) ) : ?><a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . Settings::PAGE_SLUG ) ); ?>"><?php esc_html_e( '設定', 'access-analytics-plus' ); ?></a><?php endif; ?>
+					<a class="button" href="<?php echo esc_url( admin_url( 'admin.php?page=' . AI_Report_Admin::PAGE_SLUG ) ); ?>"><?php esc_html_e( 'AI相談用レポートを作成', 'access-analytics-plus' ); ?></a>
 					<button type="button" class="button aap-mobile-button" data-aap-mobile-toggle><?php esc_html_e( 'スマホで見る', 'access-analytics-plus' ); ?></button>
 				</div>
 			</header>
@@ -147,6 +155,22 @@ final class Admin {
 				<p class="aap-region-note"><?php esc_html_e( '日本国内のconfirmedアクセスだけを、期間内の一意な訪問者数で表示します。', 'access-analytics-plus' ); ?></p>
 				<p class="aap-geoip-attribution"><a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a></p>
 			</section>
+			<?php if ( $site_kit_is_installed ) : ?>
+			<section class="aap-panel aap-search-console" data-aap-search-console data-range="28d">
+				<div class="aap-section-heading">
+					<h2><?php esc_html_e( 'Google検索キーワード', 'access-analytics-plus' ); ?> <span class="aap-experimental-badge"><?php esc_html_e( '試験機能', 'access-analytics-plus' ); ?></span></h2>
+					<span data-aap-search-console-version></span>
+				</div>
+				<nav class="aap-search-periods" aria-label="<?php esc_attr_e( 'Google検索の表示期間', 'access-analytics-plus' ); ?>">
+					<button type="button" data-search-range="7d"><?php esc_html_e( '7日', 'access-analytics-plus' ); ?></button>
+					<button type="button" data-search-range="28d" class="is-active"><?php esc_html_e( '28日', 'access-analytics-plus' ); ?></button>
+					<button type="button" data-search-range="3m"><?php esc_html_e( '3か月', 'access-analytics-plus' ); ?></button>
+				</nav>
+				<div class="aap-search-console-status" data-aap-search-console-status aria-live="polite"><?php esc_html_e( 'Site Kitとの接続を確認しています…', 'access-analytics-plus' ); ?></div>
+				<div data-aap-search-console-rows></div>
+				<p class="aap-search-console-note" data-aap-search-console-note></p>
+			</section>
+			<?php endif; ?>
 			<section class="aap-panel aap-device-panel">
 				<h2><?php esc_html_e( 'デバイス', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'スマートフォン、PC、タブレットのおおよその割合です。端末の設定により実際と異なる場合があります。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( 'デバイス分類の説明', 'access-analytics-plus' ); ?>">?</button></h2>
 				<div class="aap-device-content" data-aap-devices></div>
