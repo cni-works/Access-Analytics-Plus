@@ -20,6 +20,7 @@ if ( ! (bool) get_option( 'aap_delete_data_on_uninstall', false ) ) {
 global $wpdb;
 
 $tables = array(
+	$wpdb->prefix . 'aap_events',
 	$wpdb->prefix . 'aap_shadow_events',
 	$wpdb->prefix . 'aap_pageviews',
 	$wpdb->prefix . 'aap_sessions',
@@ -74,5 +75,17 @@ delete_option( 'aap_region_database_last_check' );
 delete_option( 'aap_ai_report_site_purpose' );
 delete_option( 'aap_ai_report_target_area' );
 delete_option( 'aap_ai_report_focus_services' );
+delete_option( 'aap_enabled_events' );
+delete_option( 'aap_conversion_events' );
 delete_transient( 'aap_confirmation_finalize_lock' );
 delete_option( 'aap_last_daily_rebuild' );
+
+// Remove cached reports and rate-limit entries only when full data removal was requested.
+foreach ( array( '_transient_aap_', '_transient_timeout_aap_', '_site_transient_aap_', '_site_transient_timeout_aap_' ) as $prefix ) {
+	$wpdb->query(
+		$wpdb->prepare(
+			"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+			$wpdb->esc_like( $prefix ) . '%'
+		)
+	);
+}

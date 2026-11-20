@@ -21,6 +21,7 @@ final class Database {
 			'daily_dimensions' => $wpdb->prefix . 'aap_daily_dimensions',
 			'exclusions_daily' => $wpdb->prefix . 'aap_exclusions_daily',
 			'shadow_events'    => $wpdb->prefix . 'aap_shadow_events',
+			'events'           => $wpdb->prefix . 'aap_events',
 		);
 	}
 
@@ -55,6 +56,8 @@ final class Database {
 		add_option( 'aap_region_tracking_started_at', current_time( 'mysql', true ), '', false );
 		add_option( 'aap_region_database_state', array(), '', false );
 		add_option( 'aap_region_database_last_check', 0, '', false );
+		add_option( 'aap_enabled_events', array( 'line_click', 'tel_click', 'contact_click', 'form_submit', 'map_click' ), '', false );
+		add_option( 'aap_conversion_events', array( 'line_click', 'tel_click', 'contact_click', 'form_submit' ), '', false );
 	}
 
 	/**
@@ -242,6 +245,27 @@ final class Database {
 			KEY session_id (session_id)
 		) {$charset_collate};";
 
+		$sql[] = "CREATE TABLE {$tables['events']} (
+			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+			event_key char(64) NOT NULL,
+			session_id bigint(20) unsigned NOT NULL,
+			pageview_id bigint(20) unsigned NOT NULL,
+			page_id bigint(20) unsigned NOT NULL,
+			event_name varchar(64) NOT NULL,
+			event_location varchar(64) NOT NULL DEFAULT 'content',
+			object_type varchar(16) NOT NULL DEFAULT 'link',
+			object_key varchar(64) NOT NULL DEFAULT '',
+			occurred_at datetime NOT NULL,
+			PRIMARY KEY  (id),
+			UNIQUE KEY event_key (event_key),
+			KEY occurred_at (occurred_at),
+			KEY event_occurred (event_name, occurred_at),
+			KEY page_occurred (page_id, occurred_at),
+			KEY session_occurred (session_id, occurred_at),
+			KEY page_event_occurred (page_id, event_name, occurred_at),
+			KEY pageview_id (pageview_id)
+		) {$charset_collate};";
+
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 
@@ -277,6 +301,8 @@ final class Database {
 		add_option( 'aap_region_tracking_started_at', current_time( 'mysql', true ), '', false );
 		add_option( 'aap_region_database_state', array(), '', false );
 		add_option( 'aap_region_database_last_check', 0, '', false );
+		add_option( 'aap_enabled_events', array( 'line_click', 'tel_click', 'contact_click', 'form_submit', 'map_click' ), '', false );
+		add_option( 'aap_conversion_events', array( 'line_click', 'tel_click', 'contact_click', 'form_submit' ), '', false );
 		return true;
 	}
 
@@ -333,6 +359,7 @@ final class Database {
 				'signal_received_at', 'promoted_at', 'last_error_stage', 'last_error_type',
 				'last_error_message', 'last_error_at', 'exclusion_recorded',
 			),
+			'events' => array( 'id', 'event_key', 'session_id', 'pageview_id', 'page_id', 'event_name', 'event_location', 'object_type', 'object_key', 'occurred_at' ),
 		);
 		$required_indexes = array(
 			'pages' => array( 'PRIMARY', 'url_hash' ),
@@ -342,6 +369,7 @@ final class Database {
 			'daily_dimensions' => array( 'PRIMARY', 'dimension_lookup' ),
 			'exclusions_daily' => array( 'PRIMARY' ),
 			'shadow_events' => array( 'PRIMARY', 'collect_key', 'pageview_id', 'recorded_at', 'ip_recorded', 'class_recorded', 'pipeline_recorded', 'mismatch_recorded' ),
+			'events' => array( 'PRIMARY', 'event_key', 'occurred_at', 'event_occurred', 'page_occurred', 'session_occurred', 'page_event_occurred' ),
 		);
 
 		foreach ( $required_columns as $key => $columns ) {

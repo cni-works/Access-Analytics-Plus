@@ -34,6 +34,7 @@ final class AAP_Test_WPDB {
 				'last_completed_stage', 'promotion_attempts', 'signal_received_at', 'promoted_at',
 				'last_error_stage', 'last_error_type', 'last_error_message', 'last_error_at', 'exclusion_recorded',
 			),
+			'wp_aap_events' => array( 'id', 'event_key', 'session_id', 'pageview_id', 'page_id', 'event_name', 'event_location', 'object_type', 'object_key', 'occurred_at' ),
 		);
 		$this->indexes = array(
 			'wp_aap_pages' => array( 'PRIMARY', 'url_hash' ),
@@ -43,6 +44,7 @@ final class AAP_Test_WPDB {
 			'wp_aap_daily_dimensions' => array( 'PRIMARY', 'dimension_lookup' ),
 			'wp_aap_exclusions_daily' => array( 'PRIMARY' ),
 			'wp_aap_shadow_events' => array( 'PRIMARY', 'collect_key', 'pageview_id', 'recorded_at', 'ip_recorded', 'class_recorded', 'pipeline_recorded', 'mismatch_recorded' ),
+			'wp_aap_events' => array( 'PRIMARY', 'event_key', 'occurred_at', 'event_occurred', 'page_occurred', 'session_occurred', 'page_event_occurred' ),
 		);
 		$this->nullable = array(
 			'collect_key' => true,
@@ -82,7 +84,13 @@ require_once dirname( __DIR__ ) . '/includes/class-database.php';
 $GLOBALS['wpdb'] = new AAP_Test_WPDB();
 $verify = new ReflectionMethod( AccessAnalyticsPlus\Database::class, 'verify_schema' );
 
-aap_schema_expect( true === $verify->invoke( null ), 'a complete DB Version 9 schema is accepted' );
+aap_schema_expect( true === $verify->invoke( null ), 'a complete DB Version 10 schema is accepted' );
+$GLOBALS['wpdb']->columns['wp_aap_events'] = array_values( array_diff( $GLOBALS['wpdb']->columns['wp_aap_events'], array( 'event_key' ) ) );
+aap_schema_expect( false === $verify->invoke( null ), 'a missing event idempotency column prevents the DB version update' );
+$GLOBALS['wpdb'] = new AAP_Test_WPDB();
+$GLOBALS['wpdb']->indexes['wp_aap_events'] = array_values( array_diff( $GLOBALS['wpdb']->indexes['wp_aap_events'], array( 'event_key' ) ) );
+aap_schema_expect( false === $verify->invoke( null ), 'a missing event idempotency index prevents the DB version update' );
+$GLOBALS['wpdb'] = new AAP_Test_WPDB();
 $GLOBALS['wpdb']->columns['wp_aap_shadow_events'] = array_values( array_diff( $GLOBALS['wpdb']->columns['wp_aap_shadow_events'], array( 'tracker_build' ) ) );
 aap_schema_expect( false === $verify->invoke( null ), 'a missing required column prevents the DB version update' );
 $GLOBALS['wpdb'] = new AAP_Test_WPDB();

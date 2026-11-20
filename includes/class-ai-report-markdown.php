@@ -38,11 +38,15 @@ final class AI_Report_Markdown {
 		self::text_section( $lines, 'サイトの目的', (string) ( $profile['purpose'] ?? '' ) );
 		self::text_section( $lines, '主な対象地域', (string) ( $profile['target_area'] ?? '' ) );
 		self::text_section( $lines, '重点サービス', (string) ( $profile['focus_services'] ?? '' ) );
+		self::site_structure( $lines, (array) ( $payload['site_structure'] ?? array() ), ! empty( $payload['include_paths'] ) );
 		self::text_section( $lines, '現在気になっていること', (string) ( $consultation['concern'] ?? '' ) );
 		self::text_section( $lines, '今回相談したい内容', (string) ( $consultation['question'] ?? '' ) );
-		self::section( $lines, '期間中の問い合わせ件数' );
-		$lines[] = null === ( $consultation['inquiries'] ?? null ) ? '未入力' : (int) $consultation['inquiries'] . '件';
-		$lines[] = '';
+		$inquiries_relevant = (bool) ( $consultation['inquiries_relevant'] ?? true );
+		if ( $inquiries_relevant ) {
+			self::section( $lines, '期間中の問い合わせ件数' );
+			$lines[] = null === ( $consultation['inquiries'] ?? null ) ? '未入力' : (int) $consultation['inquiries'] . '件';
+			$lines[] = '';
+		}
 
 		$metrics = (array) ( $analytics['metrics'] ?? array() );
 		self::section( $lines, 'アクセス概要' );
@@ -53,6 +57,8 @@ final class AI_Report_Markdown {
 			$lines[] = '| ' . $definition[0] . ' | ' . self::metric_value( $metric['value'] ?? null, $definition[1] ) . ' |';
 		}
 		$lines[] = '';
+
+		self::conversions( $lines, (array) ( $analytics['conversions'] ?? array() ) );
 
 		self::section( $lines, '前期間との比較' );
 		$lines[] = '| 指標 | 今回 | 前期間 | 実数差 | 増減率 |';
@@ -115,7 +121,7 @@ final class AI_Report_Markdown {
 			'データ量が少ない場合は、傾向を断定しないでください。',
 			'増減率は母数も確認し、少数データの大きな割合変化を過大評価しないでください。',
 		);
-		if ( null === ( $consultation['inquiries'] ?? null ) ) {
+		if ( $inquiries_relevant && null === ( $consultation['inquiries'] ?? null ) ) {
 			$notes[] = '問い合わせ件数が未入力のため、問い合わせ成果については断定できません。';
 		}
 		foreach ( $notes as $note ) {
@@ -127,12 +133,12 @@ final class AI_Report_Markdown {
 		$lines[] = 'このレポートをもとに、現在のホームページの状況を分析してください。';
 		$lines[] = '';
 		$lines[] = '以下を確認してください。';
-		foreach ( array( 'アクセス状況で気になる点', 'よく見られているページ', '改善余地がありそうなページ', '流入元の傾向', '検索キーワードの傾向', 'SEOで今後強化できそうなテーマ', '地域別アクセスの傾向', '次に優先するとよい改善施策' ) as $item ) {
+		foreach ( array( 'アクセス状況で気になる点', 'サイト構成やページ階層で改善できそうな点', '存在するのに十分見られていない可能性があるページ', '不足しているページや記事テーマ', 'よく見られているページ', '改善余地がありそうなページ', '流入元の傾向', '検索キーワードの傾向', 'SEOで今後強化できそうなテーマ', '地域別アクセスの傾向', '次に優先するとよい改善施策' ) as $item ) {
 			$lines[] = '- ' . $item;
 		}
 		$lines[] = '';
 		$lines[] = '分析では、事実・推測・改善提案を分け、データが少ない項目は断定しないでください。小規模事業者でも実行しやすい改善案を優先してください。アクセス数とSearch Consoleのクリック数を同じ指標として扱わず、増減率は実数の母数も確認してください。';
-		if ( null === ( $consultation['inquiries'] ?? null ) ) {
+		if ( $inquiries_relevant && null === ( $consultation['inquiries'] ?? null ) ) {
 			$lines[] = '問い合わせ件数がないため、問い合わせ成果については断定しないでください。';
 		}
 		if ( '' !== trim( (string) ( $consultation['question'] ?? '' ) ) ) {
@@ -145,6 +151,107 @@ final class AI_Report_Markdown {
 		$lines[] = '';
 
 		return implode( "\n", $lines );
+	}
+
+	/** @param string[] $lines @param array<string,mixed> $data */
+	private static function conversions( array &$lines, array $data ): void {
+		if ( ! isset( $data['items'] ) || ! is_array( $data['items'] ) ) { return; }
+		self::section( $lines, '問い合わせ・成果' );
+		self::bullets(
+			$lines,
+			array(
+				'CV訪問' => (int) ( $data['conversion_visits'] ?? 0 ) . '件',
+				'CV率'   => self::percent( $data['conversion_rate'] ?? 0 ),
+			)
+		);
+		$lines[] = '| 計測した操作 | 回数 | CV設定 |';
+		$lines[] = '|---|---:|---|';
+		foreach ( $data['items'] as $item ) {
+			$lines[] = '| ' . self::cell( (string) ( $item['label'] ?? $item['key'] ?? '操作' ) ) . ' | ' . (int) ( $item['value'] ?? 0 ) . ' | ' . ( ! empty( $item['conversion'] ) ? 'CV' : '参考' ) . ' |';
+		}
+		$lines[] = '';
+		$pages = (array) ( $data['pages'] ?? array() );
+		if ( $pages ) {
+			$lines[] = '### 成果が発生したページ';
+			$lines[] = '';
+			$lines[] = '| ページ | CV訪問 | 閲覧訪問 | CV率 |';
+			$lines[] = '|---|---:|---:|---:|';
+			foreach ( $pages as $page ) {
+				$lines[] = '| ' . self::cell( self::mask_sensitive_text( (string) ( $page['title'] ?? '' ) ) ) . ' | ' . (int) ( $page['cv_visits'] ?? 0 ) . ' | ' . (int) ( $page['viewing_visits'] ?? 0 ) . ' | ' . self::percent( $page['cv_rate'] ?? 0 ) . ' |';
+			}
+			$lines[] = '';
+		}
+	}
+
+	/** @param string[] $lines @param array<string,mixed> $structure */
+	private static function site_structure( array &$lines, array $structure, bool $include_paths ): void {
+		if ( empty( $structure['included'] ) ) { return; }
+		self::section( $lines, '現在のサイト構成' );
+		if ( isset( $structure['available'] ) && ! $structure['available'] ) {
+			$lines[] = self::cell( (string) ( $structure['message'] ?? 'サイト構成を取得できませんでした。' ) );
+			$lines[] = '';
+			return;
+		}
+		$summary = array( '公開固定ページ' => (int) ( $structure['published_pages'] ?? 0 ) . 'ページ' );
+		foreach ( (array) ( $structure['content_types'] ?? array() ) as $type ) {
+			$summary[ '公開' . self::cell( (string) ( $type['label'] ?? 'コンテンツ' ) ) ] = (int) ( $type['count'] ?? 0 ) . '件';
+		}
+		$summary['最終更新'] = self::cell( (string) ( $structure['last_modified'] ?? '不明' ) );
+		self::bullets( $lines, $summary );
+
+		$lines[] = '### 固定ページ';
+		$lines[] = '';
+		$pages = (array) ( $structure['pages'] ?? array() );
+		if ( empty( $pages ) ) {
+			$lines[] = '公開固定ページはありません。';
+		} else {
+			foreach ( $pages as $page ) {
+				$depth = min( 10, max( 0, (int) ( $page['depth'] ?? 0 ) ) );
+				$line = str_repeat( '  ', $depth ) . '- ' . self::cell( self::mask_sensitive_text( (string) ( $page['title'] ?? '' ) ) );
+				if ( $include_paths && ! empty( $page['path'] ) ) { $line .= '（' . self::cell( (string) $page['path'] ) . '）'; }
+				$lines[] = $line;
+			}
+		}
+		if ( ! empty( $structure['pages_truncated'] ) ) { $lines[] = '- 固定ページが多いため、先頭' . (int) ( $structure['published_pages'] ?? 0 ) . '件まで表示しています。'; }
+		$lines[] = '';
+
+		$lines[] = '### 投稿カテゴリー';
+		$lines[] = '';
+		$categories = (array) ( $structure['categories'] ?? array() );
+		if ( empty( $categories ) ) {
+			$lines[] = 'カテゴリー付きの公開投稿はありません。';
+		} else {
+			$lines[] = '| カテゴリー | 記事数 |';
+			$lines[] = '|---|---:|';
+			foreach ( $categories as $category ) {
+				$lines[] = '| ' . self::cell( self::mask_sensitive_text( (string) ( $category['name'] ?? '' ) ) ) . ' | ' . (int) ( $category['count'] ?? 0 ) . ' |';
+			}
+		}
+		$lines[] = '';
+
+		$all_posts = ! empty( $structure['all_post_titles'] );
+		foreach ( (array) ( $structure['content_types'] ?? array() ) as $type ) {
+			$label = self::cell( (string) ( $type['label'] ?? 'コンテンツ' ) );
+			$lines[] = $all_posts ? '### 公開' . $label . 'タイトル' : '### 最近更新された' . $label;
+			$lines[] = '';
+			$posts = (array) ( $type['posts'] ?? array() );
+			if ( empty( $posts ) ) {
+				$lines[] = '公開中の' . $label . 'はありません。';
+			} else {
+				foreach ( $posts as $post ) {
+					$line = '- ' . self::cell( self::mask_sensitive_text( (string) ( $post['title'] ?? '' ) ) );
+					if ( ! empty( $post['modified'] ) ) { $line .= '（更新：' . self::cell( (string) $post['modified'] ) . '）'; }
+					if ( $include_paths && ! empty( $post['path'] ) ) { $line .= '（' . self::cell( (string) $post['path'] ) . '）'; }
+					$lines[] = $line;
+				}
+			}
+			if ( ! empty( $type['truncated'] ) ) {
+				$lines[] = $all_posts
+					? '- 公開コンテンツが多いため、レポート全体で最大' . (int) ( $structure['post_title_limit'] ?? 300 ) . '件まで掲載しています。'
+					: '- 標準表示では最近更新された' . count( $posts ) . '件まで掲載しています。';
+			}
+			$lines[] = '';
+		}
 	}
 
 	public static function mask_query( string $query ): string {

@@ -172,6 +172,233 @@
     });
   }
 
+  function resetHourDetail(container, sample) {
+	var panel = container.querySelector('[data-aap-hour-detail]');
+	if (!panel) return;
+	if (container.aapHourDetailController) container.aapHourDetailController.abort();
+	container.aapHourDetailController = null;
+	container.querySelectorAll('[data-aap-hour-trigger]').forEach(function (trigger) {
+	  trigger.classList.remove('is-selected');
+	  trigger.setAttribute('aria-expanded', 'false');
+	});
+	clear(panel);
+	panel.hidden = !sample;
+	if (sample) {
+	  var message = document.createElement('p');
+	  message.className = 'aap-hour-detail-message';
+	  message.textContent = 'サンプル表示では時間別の詳細内訳を利用できません。実データ表示へ戻すと確認できます。';
+	  panel.appendChild(message);
+	}
+  }
+
+  function detailMetric(label, value) {
+	var item = document.createElement('div');
+	item.className = 'aap-hour-detail-metric';
+	var name = document.createElement('span');
+	name.textContent = label;
+	var strong = document.createElement('strong');
+	strong.textContent = value;
+	item.append(name, strong);
+	return item;
+  }
+
+  function detailBreakdown(title, data, emptyText, unit) {
+	var section = document.createElement('section');
+	section.className = 'aap-hour-detail-section';
+	var heading = document.createElement('h4');
+	heading.textContent = title;
+	section.appendChild(heading);
+	var rows = data && Array.isArray(data.items) ? data.items : [];
+	if (!rows.length) {
+	  var empty = document.createElement('p');
+	  empty.className = 'aap-hour-detail-empty';
+	  empty.textContent = emptyText || '該当するデータはありません。';
+	  section.appendChild(empty);
+	  return section;
+	}
+	var list = document.createElement('div');
+	list.className = 'aap-hour-detail-breakdown';
+	rows.forEach(function (row) {
+	  var item = document.createElement('div');
+	  var label = document.createElement('span');
+	  label.textContent = row.label;
+	  var value = document.createElement('strong');
+	  value.textContent = number.format(row.value) + (unit || '訪問') + '（' + number.format(row.percent) + '%）';
+	  item.append(label, value);
+	  list.appendChild(item);
+	});
+	section.appendChild(list);
+	return section;
+  }
+
+  function renderHourDetail(container, data) {
+	var panel = container.querySelector('[data-aap-hour-detail]');
+	if (!panel) return;
+	clear(panel);
+	panel.hidden = false;
+	if (!data.available) {
+	  var unavailable = document.createElement('p');
+	  unavailable.className = 'aap-hour-detail-message';
+	  unavailable.textContent = data.message || 'この時間の詳細を確認できません。';
+	  panel.appendChild(unavailable);
+	  return;
+	}
+	var header = document.createElement('div');
+	header.className = 'aap-hour-detail-heading';
+	var heading = document.createElement('h3');
+	heading.textContent = String(data.period.label).replace(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/, '$1年$2月$3日') + 'の詳細';
+	var close = document.createElement('button');
+	close.type = 'button';
+	close.className = 'button-link';
+	close.textContent = '閉じる';
+	close.addEventListener('click', function () { resetHourDetail(container, false); });
+	header.append(heading, close);
+	panel.appendChild(header);
+
+	var metrics = document.createElement('div');
+	metrics.className = 'aap-hour-detail-metrics';
+	metrics.append(
+	  detailMetric('訪問者', number.format(data.overview.visitors) + '人'),
+	  detailMetric('訪問', number.format(data.overview.visits) + '回'),
+	  detailMetric('PV', number.format(data.overview.pageviews))
+	);
+	panel.appendChild(metrics);
+
+	var quality = document.createElement('section');
+	quality.className = 'aap-hour-detail-section';
+	var qualityHeading = document.createElement('h4');
+	qualityHeading.textContent = '閲覧品質';
+	var qualityMetrics = document.createElement('div');
+	qualityMetrics.className = 'aap-hour-detail-quality';
+	qualityMetrics.append(
+	  detailMetric('平均有効閲覧時間', data.quality.average_engaged_seconds === null ? '集計中' : formatDuration(data.quality.average_engaged_seconds)),
+	  detailMetric('直帰率', data.quality.bounce_rate === null ? '集計中' : number.format(data.quality.bounce_rate) + '%'),
+	  detailMetric('終了済み訪問', number.format(data.quality.ended_visits) + '回')
+	);
+	quality.append(qualityHeading, qualityMetrics);
+	var qualityNote = document.createElement('p');
+	qualityNote.className = 'aap-hour-detail-note';
+	qualityNote.textContent = '閲覧品質は、この時間に開始し、最終アクセスから30分以上経過した訪問を基準にしています。' + (data.quality.provisional ? ' 現在または直近の時間は暫定値です。' : '') + (data.quality.partial ? ' 有効時間の計測開始後のみ集計しています。' : '');
+	quality.appendChild(qualityNote);
+	panel.appendChild(quality);
+
+	var grid = document.createElement('div');
+	grid.className = 'aap-hour-detail-grid';
+	grid.append(
+	  detailBreakdown('国（推定）', data.countries, '国を判定できる訪問はありません。'),
+	  detailBreakdown('都道府県（推定）', data.regions, data.regions && data.regions.available ? '日本国内で都道府県を判定できる訪問はありません。' : '地域計測開始前のため確認できません。'),
+	  detailBreakdown('デバイス', data.devices),
+	  detailBreakdown('どこから来た？', data.sources)
+	);
+	panel.appendChild(grid);
+
+	var pages = document.createElement('section');
+	pages.className = 'aap-hour-detail-section';
+	var pagesHeading = document.createElement('h4');
+	pagesHeading.textContent = 'よく見られたページ';
+	pages.appendChild(pagesHeading);
+	if (!data.pages.length) {
+	  var noPages = document.createElement('p');
+	  noPages.className = 'aap-hour-detail-empty';
+	  noPages.textContent = 'この時間に記録されたページはありません。';
+	  pages.appendChild(noPages);
+	} else {
+	  var pageList = document.createElement('ol');
+	  pageList.className = 'aap-hour-detail-pages';
+	  data.pages.forEach(function (row) {
+		var item = document.createElement('li');
+		var title = document.createElement('span');
+		title.textContent = row.title;
+		var value = document.createElement('strong');
+		value.textContent = number.format(row.pageviews) + 'PV（' + number.format(row.percent) + '%）';
+		item.append(title, value);
+		pageList.appendChild(item);
+	  });
+	  pages.appendChild(pageList);
+	}
+	panel.appendChild(pages);
+
+	var diagnostics = document.createElement('section');
+	diagnostics.className = 'aap-hour-detail-section';
+	var diagHeading = document.createElement('h4');
+	diagHeading.textContent = '通常解析に含めなかった診断対象';
+	diagnostics.appendChild(diagHeading);
+	if (!data.diagnostics.available) {
+	  var diagUnavailable = document.createElement('p');
+	  diagUnavailable.className = 'aap-hour-detail-empty';
+	  diagUnavailable.textContent = data.diagnostics.message;
+	  diagnostics.appendChild(diagUnavailable);
+	} else {
+	  var labels = { pending: '判定待ち', unconfirmed: '未確認', bot: 'Bot・自動巡回', geo_excluded: '対象地域外' };
+	  var diagList = document.createElement('div');
+	  diagList.className = 'aap-hour-detail-breakdown';
+	  Object.keys(labels).forEach(function (key) {
+		var row = document.createElement('div');
+		var label = document.createElement('span');
+		label.textContent = labels[key];
+		var value = document.createElement('strong');
+		value.textContent = number.format(data.diagnostics.counts[key] || 0) + '件';
+		row.append(label, value);
+		diagList.appendChild(row);
+	  });
+	  diagnostics.appendChild(diagList);
+	  if (data.diagnostics.geo_countries && data.diagnostics.geo_countries.length) diagnostics.appendChild(detailBreakdown('対象地域外の国（推定）', { items: data.diagnostics.geo_countries }, '', '件'));
+	}
+	panel.appendChild(diagnostics);
+
+	var note = document.createElement('p');
+	note.className = 'aap-hour-detail-privacy';
+	note.textContent = 'すべて集計値です。個別の閲覧者、正確な閲覧時刻、IPアドレスは表示しません。国・都道府県は推定値です。';
+	if (data.legacy) note.textContent += ' この時間には新しいconfirmed集計開始前のデータが含まれる可能性があります。';
+	panel.appendChild(note);
+  }
+
+  function openHourDetail(container, row, trigger) {
+	var panel = container.querySelector('[data-aap-hour-detail]');
+	if (!panel || !window.aapAdmin.hourDetailEndpoint || !/^\d{4}-\d{2}-\d{2} \d{2}:00$/.test(row.date)) return;
+	container.querySelectorAll('[data-aap-hour-trigger]').forEach(function (item) {
+	  var selected = item.dataset.aapTime === row.date;
+	  item.classList.toggle('is-selected', selected);
+	  item.setAttribute('aria-expanded', selected ? 'true' : 'false');
+	});
+	if (container.dataset.aapSample === '1') {
+	  resetHourDetail(container, true);
+	  return;
+	}
+	if (container.aapHourDetailController) container.aapHourDetailController.abort();
+	container.aapHourDetailController = new AbortController();
+	clear(panel);
+	panel.hidden = false;
+	panel.setAttribute('aria-busy', 'true');
+	var loading = document.createElement('p');
+	loading.className = 'aap-hour-detail-message';
+	loading.textContent = '時間別の詳細を読み込んでいます…';
+	panel.appendChild(loading);
+	var params = new URLSearchParams({ date: row.date.slice(0, 10), hour: String(Number(row.date.slice(11, 13))) });
+	window.fetch(window.aapAdmin.hourDetailEndpoint + '?' + params.toString(), {
+	  credentials: 'same-origin', cache: 'no-store', headers: { 'X-WP-Nonce': window.aapAdmin.nonce }, signal: container.aapHourDetailController.signal
+	}).then(function (response) {
+	  return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || '時間別の詳細を取得できませんでした。'); return data; });
+	}).then(function (data) {
+	  panel.removeAttribute('aria-busy');
+	  renderHourDetail(container, data);
+	  if (trigger && trigger.matches(':focus')) panel.focus({ preventScroll: true });
+	}).catch(function (error) {
+	  if (error.name === 'AbortError') return;
+	  panel.removeAttribute('aria-busy');
+	  clear(panel);
+	  var message = document.createElement('p');
+	  message.className = 'aap-hour-detail-message is-error';
+	  message.textContent = error.message || '時間別の詳細を取得できませんでした。';
+	  var retry = document.createElement('button');
+	  retry.type = 'button';
+	  retry.className = 'button button-secondary';
+	  retry.textContent = 'もう一度試す';
+	  retry.addEventListener('click', function () { openHourDetail(container, row, trigger); });
+	  panel.append(message, retry);
+	});
+  }
+
   function renderChart(container, rows, compact) {
     var target = container.querySelector('[data-aap-chart]');
     if (!target) return;
@@ -206,6 +433,7 @@
     var usableWidth = width - padLeft - padRight;
     var usableHeight = height - padTop - padBottom;
 	var dailySeries = isDailyRows(rows);
+	var sampleMode = container.dataset.aapSample === '1';
 	var slotWidth = usableWidth / Math.max(1, rows.length);
 	var points = rows.map(function (row, index) {
       var x = padLeft + (index + .5) * slotWidth;
@@ -316,10 +544,15 @@
 		hit.setAttribute('width', slotWidth);
 		hit.setAttribute('height', usableHeight);
 		hit.setAttribute('class', 'aap-chart-hit');
+		hit.setAttribute('data-aap-time', point.row.date);
 		hit.setAttribute('fill', 'transparent');
 		hit.setAttribute('stroke', 'none');
 		hit.setAttribute('tabindex', '0');
-		hit.setAttribute('role', dailySeries && !compact ? 'button' : 'img');
+		hit.setAttribute('role', !compact && !sampleMode ? 'button' : 'img');
+		if (!dailySeries && !compact && !sampleMode) {
+		  hit.setAttribute('data-aap-hour-trigger', '');
+		  hit.setAttribute('aria-expanded', 'false');
+		}
 		hit.setAttribute('aria-label', pointHeading(point.row, dailySeries) + '、訪問者' + point.row.visitors + '人、PV' + point.row.pageviews);
 		hit.addEventListener('mouseenter', function () { showDetails(false); });
 		hit.addEventListener('mouseleave', hideDetails);
@@ -329,6 +562,7 @@
 		  var touchInteraction = window.matchMedia && window.matchMedia('(hover: none)').matches;
 		  showDetails(touchInteraction);
 		  if (dailySeries && !compact) drillIntoDay(container, point.row.date);
+		  else if (!compact && !sampleMode) openHourDetail(container, point.row, hit);
 		});
 		hit.addEventListener('keydown', function (event) {
 		  if (event.key === 'Enter' || event.key === ' ') {
@@ -357,7 +591,7 @@
 
 	var helper = document.createElement('p');
 	helper.className = 'aap-chart-helper';
-	helper.textContent = compact ? (dailySeries ? '直近7日間の訪問者推移' : '時間別の訪問者推移') : (dailySeries ? '棒を選ぶと、その日の時間別表示へ移動します。' : '棒にマウスを重ねるかタップすると、人数とPVを確認できます。');
+	helper.textContent = compact ? (dailySeries ? '直近7日間の訪問者推移' : '時間別の訪問者推移') : (dailySeries ? '棒を選ぶと、その日の時間別表示へ移動します。' : '棒を選ぶと、その時間の内訳を確認できます。');
 	target.appendChild(helper);
   }
 
@@ -406,10 +640,17 @@
 		var list = document.createElement('div');
 		list.className = 'aap-timeseries-list';
 		visibleRows.forEach(function (row) {
-		  var item = document.createElement(daily ? 'button' : 'div');
-		  if (daily) item.type = 'button';
+		  var item = document.createElement('button');
+		  item.type = 'button';
 		  item.className = 'aap-timeseries-row' + (row.visitors === 0 && row.pageviews === 0 ? ' is-zero' : '');
 		  item.dataset.aapTime = row.date;
+		  if (!daily) {
+			item.setAttribute('data-aap-hour-trigger', '');
+			item.setAttribute('aria-expanded', 'false');
+			item.setAttribute('aria-label', String(row.label).replace(/時$/, '時') + 'の詳細を見る');
+			item.disabled = container.dataset.aapSample === '1';
+			if (item.disabled) item.title = 'サンプル表示では時間別の詳細内訳を利用できません。';
+		  }
 		  item.addEventListener('mouseenter', function () { highlightTime(container, row.date); });
 		  item.addEventListener('mouseleave', function () { highlightTime(container, null); });
 		  item.addEventListener('focus', function () { highlightTime(container, row.date); });
@@ -433,6 +674,7 @@
 		  engagement.textContent = '平均閲覧 ' + (row.average_engaged_seconds === null || typeof row.average_engaged_seconds === 'undefined' ? '集計中' : formatDuration(row.average_engaged_seconds));
 		  item.append(time, visitors, pageviews, engagement);
 		  if (daily) item.addEventListener('click', function () { drillIntoDay(container, row.date); });
+		  else item.addEventListener('click', function () { openHourDetail(container, row, item); });
 		  list.appendChild(item);
 		});
 		target.appendChild(list);
@@ -737,7 +979,56 @@
       return;
     }
 
-    renderBarItems(target, devices);
+    var rows = devices.map(function (row) {
+      return {
+        label: row.label || '判定不能',
+        value: Number(row.value || 0),
+        percent: Number(row.percent || 0)
+      };
+    });
+    var totalPercent = rows.reduce(function (sum, row) { return sum + Math.max(0, row.percent); }, 0) || 100;
+    var colors = ['#1677ff', '#69a7f5', '#a8cbed', '#d9e5f2'];
+    var cursor = 0;
+    var segments = rows.map(function (row, index) {
+      var start = cursor;
+      cursor += Math.max(0, row.percent) / totalPercent * 100;
+      return colors[index % colors.length] + ' ' + start + '% ' + cursor + '%';
+    });
+    if (cursor < 100) segments.push('#eef3f8 ' + cursor + '% 100%');
+
+    var summary = document.createElement('div');
+    summary.className = 'aap-device-summary';
+    var donut = document.createElement('div');
+    donut.className = 'aap-device-donut';
+    donut.style.background = 'conic-gradient(' + segments.join(', ') + ')';
+    donut.setAttribute('role', 'img');
+    donut.setAttribute('aria-label', rows.map(function (row) { return row.label + ' ' + row.percent + '%'; }).join('、'));
+    var dominant = rows.slice().sort(function (a, b) { return b.percent - a.percent; })[0];
+    var center = document.createElement('div');
+    center.className = 'aap-device-donut-center';
+    var centerValue = document.createElement('strong');
+    centerValue.textContent = dominant.percent + '%';
+    var centerLabel = document.createElement('span');
+    centerLabel.textContent = dominant.label;
+    center.append(centerValue, centerLabel);
+    donut.appendChild(center);
+
+    var legend = document.createElement('ul');
+    legend.className = 'aap-device-legend';
+    rows.forEach(function (row, index) {
+      var item = document.createElement('li');
+      var label = document.createElement('span');
+      var swatch = document.createElement('i');
+      swatch.style.background = colors[index % colors.length];
+      swatch.setAttribute('aria-hidden', 'true');
+      label.append(swatch, document.createTextNode(row.label));
+      var value = document.createElement('strong');
+      value.textContent = row.percent + '%';
+      item.append(label, value);
+      legend.appendChild(item);
+    });
+    summary.append(donut, legend);
+    target.appendChild(summary);
   }
 
   function renderRegions(container, regions) {
@@ -847,6 +1138,21 @@
     pages.forEach(function (page) {
       var item = document.createElement('li');
       var title = document.createElement('span');
+      if (typeof page.path === 'string' && page.path.charAt(0) === '/') {
+        try {
+          var baseUrl = new URL(window.aapAdmin.siteUrl || window.location.origin);
+          var pageUrl = new URL(page.path, baseUrl);
+          if (pageUrl.origin === baseUrl.origin) {
+            title = document.createElement('a');
+            title.href = pageUrl.href;
+            title.target = '_blank';
+            title.rel = 'noopener noreferrer';
+            title.title = '公開ページを新しいタブで開く';
+          }
+        } catch (error) {
+          // Invalid or external paths remain plain text.
+        }
+      }
       title.textContent = page.title;
       var value = document.createElement('strong');
       value.textContent = number.format(page.pageviews) + ' PV';
@@ -854,6 +1160,89 @@
       list.appendChild(item);
     });
     target.appendChild(list);
+  }
+
+  function renderConversions(container, data, compact) {
+    var panel = container.querySelector('[data-aap-conversions]');
+    if (!panel || compact) return;
+    if (!data || !Array.isArray(data.items)) {
+      panel.hidden = true;
+      return;
+    }
+    var activeItems = data.items.filter(function (entry) { return Number(entry.value) > 0; });
+    if (!activeItems.length) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    var summary = panel.querySelector('[data-aap-conversion-summary]');
+    var events = panel.querySelector('[data-aap-conversion-events]');
+    var pages = panel.querySelector('[data-aap-conversion-pages]');
+    var note = panel.querySelector('[data-aap-conversion-note]');
+    clear(summary);
+    clear(events);
+    clear(pages);
+
+    [
+      ['CV訪問', number.format(Number(data.conversion_visits) || 0) + '件'],
+      ['CV率', (Number(data.conversion_rate) || 0).toLocaleString('ja-JP', { maximumFractionDigits: 1 }) + '%']
+    ].forEach(function (entry) {
+      var card = document.createElement('div');
+      var label = document.createElement('span');
+      var value = document.createElement('strong');
+      label.textContent = entry[0];
+      value.textContent = entry[1];
+      card.append(label, value);
+      summary.appendChild(card);
+    });
+
+    events.hidden = false;
+    if (activeItems.length) {
+      var heading = document.createElement('h3');
+      heading.textContent = '計測した操作';
+      events.appendChild(heading);
+      var eventList = document.createElement('div');
+      eventList.className = 'aap-conversion-event-list';
+      activeItems.forEach(function (entry) {
+        var row = document.createElement('div');
+        var label = document.createElement('span');
+        var value = document.createElement('strong');
+        label.textContent = entry.label || entry.key || '操作';
+        if (entry.conversion) {
+          var badge = document.createElement('small');
+          badge.textContent = 'CV';
+          label.appendChild(badge);
+        }
+        value.textContent = number.format(Number(entry.value) || 0) + '回';
+        row.append(label, value);
+        eventList.appendChild(row);
+      });
+      events.appendChild(eventList);
+    }
+
+    var pageHeading = document.createElement('h3');
+    pageHeading.textContent = '成果が発生したページ';
+    pages.appendChild(pageHeading);
+    if (!Array.isArray(data.pages) || !data.pages.length) {
+      var empty = document.createElement('p');
+      empty.className = 'aap-conversion-empty';
+      empty.textContent = 'この期間に成果として集計された操作はありません。';
+      pages.appendChild(empty);
+    } else {
+      var pageList = document.createElement('div');
+      pageList.className = 'aap-conversion-page-list';
+      data.pages.forEach(function (entry) {
+        var row = document.createElement('div');
+        var title = document.createElement('strong');
+        var metrics = document.createElement('span');
+        title.textContent = entry.title || 'ページ';
+        metrics.textContent = 'CV ' + number.format(Number(entry.cv_visits) || 0) + '訪問 / 閲覧 ' + number.format(Number(entry.viewing_visits) || 0) + '訪問 / CV率 ' + (Number(entry.cv_rate) || 0).toLocaleString('ja-JP', { maximumFractionDigits: 1 }) + '%';
+        row.append(title, metrics);
+        pageList.appendChild(row);
+      });
+      pages.appendChild(pageList);
+    }
+    if (note) note.textContent = data.definition_note || '';
   }
 
   function renderSearchConsole(container, data) {
@@ -998,11 +1387,14 @@
         return data;
       });
     }).then(function (data) {
+	  container.dataset.aapSample = data.sample ? '1' : '0';
+	  resetHourDetail(container, !!data.sample);
 	  renderMetrics(container, compact ? data.dashboard.metrics : data.metrics, compact, compact ? null : (data.quality || null));
       renderChart(container, data.timeseries, compact);
 	  renderTimeseriesList(container, data.timeseries, compact);
 	  renderSources(container, data.sources, data.source_details || { search: [], social: [] });
       renderPages(container, data.pages, compact);
+	  renderConversions(container, data.conversions || null, compact);
 	  renderRegions(container, data.regions || null);
 	  renderDevices(container, data.devices || []);
 	  renderExclusions(container, data.exclusions || null);

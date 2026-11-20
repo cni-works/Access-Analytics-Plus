@@ -70,6 +70,14 @@ final class AI_Report_Admin {
 		$sample = Settings::sample_enabled();
 		$site_kit = Search_Console_Service::is_site_kit_installed();
 		$today = current_datetime()->format( 'Y-m-d' );
+		$concern_options = AI_Report::concern_options();
+		$advice_options = AI_Report::advice_options();
+		$concern_topics = (array) ( $request['concern_topics'] ?? array() );
+		$advice_types = (array) ( $request['advice_types'] ?? array() );
+		$show_concern_other = in_array( 'other', $concern_topics, true );
+		$show_advice_other = in_array( 'other', $advice_types, true );
+		$show_inquiries = in_array( 'increase_inquiries', $concern_topics, true );
+		$show_all_post_titles = ! empty( $request['include_site_structure'] );
 		?>
 		<div class="wrap aap-wrap aap-ai-report-wrap">
 			<header class="aap-header">
@@ -98,18 +106,37 @@ final class AI_Report_Admin {
 
 				<form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ); ?>" class="aap-ai-report-form" data-aap-ai-report-form>
 					<?php wp_nonce_field( 'aap_preview_ai_report' ); ?>
+					<input type="hidden" name="guided_input" value="1">
 					<div class="aap-ai-fields">
 						<fieldset><legend><?php esc_html_e( '集計期間', 'access-analytics-plus' ); ?></legend><div class="aap-ai-periods">
 							<?php foreach ( array( '7d' => '直近7日', '28d' => '直近28日', '3m' => '直近3か月', 'custom' => '期間指定' ) as $value => $label ) : ?><label><input type="radio" name="report_range" value="<?php echo esc_attr( $value ); ?>" <?php checked( $request['range'], $value ); ?>> <span><?php echo esc_html( $label ); ?></span></label><?php endforeach; ?>
 						</div></fieldset>
 						<div class="aap-ai-custom-period" data-aap-ai-custom-period <?php echo 'custom' === $request['range'] ? '' : 'hidden'; ?>><label><?php esc_html_e( '開始日', 'access-analytics-plus' ); ?><input type="date" name="start" max="<?php echo esc_attr( $today ); ?>" value="<?php echo esc_attr( $request['period']['start']->format( 'Y-m-d' ) ); ?>"></label><label><?php esc_html_e( '終了日', 'access-analytics-plus' ); ?><input type="date" name="end" max="<?php echo esc_attr( $today ); ?>" value="<?php echo esc_attr( $request['period']['end']->format( 'Y-m-d' ) ); ?>"></label><span><?php esc_html_e( '最大90日', 'access-analytics-plus' ); ?></span></div>
-						<label><strong><?php esc_html_e( '現在気になっていること', 'access-analytics-plus' ); ?></strong><textarea name="concern" maxlength="2000" rows="3"><?php echo esc_textarea( (string) $request['concern'] ); ?></textarea></label>
-						<label><strong><?php esc_html_e( '今回AIに相談したい内容', 'access-analytics-plus' ); ?></strong><textarea name="question" maxlength="2000" rows="3"><?php echo esc_textarea( (string) $request['question'] ); ?></textarea></label>
-						<label><strong><?php esc_html_e( '期間中の問い合わせ件数（任意）', 'access-analytics-plus' ); ?></strong><input type="number" name="inquiries" min="0" max="1000000" inputmode="numeric" value="<?php echo null === $request['inquiries'] ? '' : esc_attr( (string) $request['inquiries'] ); ?>"><small><?php esc_html_e( 'フォーム・電話・LINE等を合計した概数でも構いません。', 'access-analytics-plus' ); ?></small></label>
-						<div class="aap-ai-options">
-							<label><input type="checkbox" name="include_paths" value="1" <?php checked( (bool) $request['include_paths'] ); ?>> <?php esc_html_e( 'ページPathを含める', 'access-analytics-plus' ); ?></label>
-							<?php if ( $site_kit ) : ?><label><input type="checkbox" name="include_search" value="1" <?php checked( (bool) $request['include_search'] ); ?>> <?php esc_html_e( 'Google検索データを含める', 'access-analytics-plus' ); ?></label><?php else : ?><span><?php esc_html_e( 'Google検索データ：Site Kit未導入のため利用できません', 'access-analytics-plus' ); ?></span><?php endif; ?>
-						</div>
+						<fieldset class="aap-ai-choice-group">
+							<legend><strong><?php esc_html_e( '今、気になっていることは？', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '複数選択できます', 'access-analytics-plus' ); ?></small></legend>
+							<div class="aap-ai-choices">
+								<?php foreach ( $concern_options as $value => $label ) : ?><label class="aap-ai-choice"><input type="checkbox" name="concern_topics[]" value="<?php echo esc_attr( $value ); ?>" <?php checked( in_array( $value, $concern_topics, true ) ); ?>><span><?php echo esc_html( $label ); ?></span></label><?php endforeach; ?>
+							</div>
+						</fieldset>
+						<div class="aap-ai-conditional" data-aap-concern-other <?php echo $show_concern_other ? '' : 'hidden'; ?>><label><strong><?php esc_html_e( 'その他の気になること', 'access-analytics-plus' ); ?></strong><textarea name="concern_other" maxlength="500" rows="2" <?php disabled( ! $show_concern_other ); ?>><?php echo esc_textarea( (string) ( $request['concern_other'] ?? '' ) ); ?></textarea></label></div>
+						<div class="aap-ai-conditional" data-aap-inquiries <?php echo $show_inquiries ? '' : 'hidden'; ?>><label><strong><?php esc_html_e( '期間中の問い合わせ件数（任意）', 'access-analytics-plus' ); ?></strong><input type="number" name="inquiries" min="0" max="1000000" inputmode="numeric" value="<?php echo null === $request['inquiries'] ? '' : esc_attr( (string) $request['inquiries'] ); ?>" <?php disabled( ! $show_inquiries ); ?>><small><?php esc_html_e( 'フォーム・電話・LINE等を合計した概数で構いません。分からない場合は空欄のままで進められます。', 'access-analytics-plus' ); ?></small></label></div>
+						<fieldset class="aap-ai-choice-group">
+							<legend><strong><?php esc_html_e( 'AIにどんな形で答えてほしいですか？', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '欲しい回答を複数選択できます', 'access-analytics-plus' ); ?></small></legend>
+							<div class="aap-ai-choices">
+								<?php foreach ( $advice_options as $value => $label ) : ?><label class="aap-ai-choice"><input type="checkbox" name="advice_types[]" value="<?php echo esc_attr( $value ); ?>" <?php checked( in_array( $value, $advice_types, true ) ); ?>><span><?php echo esc_html( $label ); ?></span></label><?php endforeach; ?>
+							</div>
+						</fieldset>
+						<div class="aap-ai-conditional" data-aap-advice-other <?php echo $show_advice_other ? '' : 'hidden'; ?>><label><strong><?php esc_html_e( 'その他にAIへ相談したいこと', 'access-analytics-plus' ); ?></strong><textarea name="advice_other" maxlength="500" rows="2" <?php disabled( ! $show_advice_other ); ?>><?php echo esc_textarea( (string) ( $request['advice_other'] ?? '' ) ); ?></textarea></label></div>
+						<fieldset class="aap-ai-report-options">
+							<legend><strong><?php esc_html_e( 'レポートに含める情報', 'access-analytics-plus' ); ?></strong></legend>
+							<p><?php esc_html_e( 'チェックした情報はダウンロードするレポートへ追加され、STEP 2のプレビューで確認できます。', 'access-analytics-plus' ); ?></p>
+							<div class="aap-ai-options">
+								<label class="aap-ai-option"><input type="checkbox" name="include_site_structure" value="1" <?php checked( (bool) $request['include_site_structure'] ); ?>><span><strong><?php esc_html_e( '現在のサイト構成を含める', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '公開固定ページの階層、カテゴリー、投稿・公開カスタム投稿の件数と、最近更新されたタイトルを種類ごとに最大20件含めます。通常はこちらだけで十分です。本文や非公開情報は含めません。', 'access-analytics-plus' ); ?></small></span></label>
+								<div class="aap-ai-conditional" data-aap-all-post-titles <?php echo $show_all_post_titles ? '' : 'hidden'; ?>><label class="aap-ai-option"><input type="checkbox" name="include_all_post_titles" value="1" <?php checked( (bool) $request['include_all_post_titles'] ); ?> <?php disabled( ! $show_all_post_titles ); ?>><span><strong><?php esc_html_e( '公開記事のタイトルを詳しく含める（最大300件）', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '記事の重複や不足しているテーマを、サイト全体から詳しく探したい場合にチェックしてください。最近の20件だけでは足りない場合に利用します。', 'access-analytics-plus' ); ?></small></span></label></div>
+								<label class="aap-ai-option"><input type="checkbox" name="include_paths" value="1" <?php checked( (bool) $request['include_paths'] ); ?>><span><strong><?php esc_html_e( 'ページの場所（URL）を含める', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( '人気ページとサイト構成に「/service/」のような場所を添え、AIが改善対象を区別しやすくします。', 'access-analytics-plus' ); ?></small></span></label>
+								<?php if ( $site_kit ) : ?><label class="aap-ai-option"><input type="checkbox" name="include_search" value="1" <?php checked( (bool) $request['include_search'] ); ?>><span><strong><?php esc_html_e( 'Google検索データを含める', 'access-analytics-plus' ); ?></strong><small><?php esc_html_e( 'Site Kitから検索語句・クリック数・表示回数・CTR・平均順位を加え、SEOの相談に役立てます。', 'access-analytics-plus' ); ?></small></span></label><?php else : ?><p class="aap-ai-option-unavailable"><?php esc_html_e( 'Google検索データは、Site Kitが導入されている場合に選択できます。', 'access-analytics-plus' ); ?></p><?php endif; ?>
+							</div>
+						</fieldset>
 					</div>
 					<button type="submit" name="aap_ai_preview" value="1" class="button button-primary button-hero" <?php disabled( $sample ); ?>><?php esc_html_e( 'レポートを作成して確認', 'access-analytics-plus' ); ?></button>
 				</form>
@@ -181,14 +208,13 @@ final class AI_Report_Admin {
 		header( 'Content-Type: text/markdown; charset=UTF-8' );
 		header( 'Content-Disposition: attachment; filename="site-analysis-' . current_datetime()->format( 'Y-m-d' ) . '.md"' );
 		header( 'X-Content-Type-Options: nosniff' );
-		header( 'Content-Length: ' . strlen( $markdown ) );
 		echo $markdown; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Plain text download after renderer sanitization.
 		exit;
 	}
 
 	/** @return array<string,mixed> */
 	private static function default_request(): array {
-		$normalized = AI_Report::normalize_request( array( 'report_range' => '28d', 'include_search' => 1, 'include_paths' => 1 ) );
+		$normalized = AI_Report::normalize_request( array( 'report_range' => '28d', 'guided_input' => 1, 'include_search' => 1, 'include_paths' => 1, 'include_site_structure' => 1 ) );
 		return is_wp_error( $normalized ) ? array() : $normalized;
 	}
 
@@ -222,15 +248,32 @@ final class AI_Report_Admin {
 			'concern'      => (string) $request['concern'],
 			'question'     => (string) $request['question'],
 			'inquiries'    => null === $request['inquiries'] ? '' : (string) $request['inquiries'],
+			'concern_other' => (string) ( $request['concern_other'] ?? '' ),
+			'advice_other' => (string) ( $request['advice_other'] ?? '' ),
 		);
 		foreach ( $fields as $name => $value ) {
 			echo '<input type="hidden" name="' . esc_attr( $name ) . '" value="' . esc_attr( $value ) . '">';
+		}
+		if ( ! empty( $request['guided_input'] ) ) {
+			echo '<input type="hidden" name="guided_input" value="1">';
+			foreach ( (array) ( $request['concern_topics'] ?? array() ) as $value ) {
+				echo '<input type="hidden" name="concern_topics[]" value="' . esc_attr( (string) $value ) . '">';
+			}
+			foreach ( (array) ( $request['advice_types'] ?? array() ) as $value ) {
+				echo '<input type="hidden" name="advice_types[]" value="' . esc_attr( (string) $value ) . '">';
+			}
 		}
 		if ( ! empty( $request['include_search'] ) ) {
 			echo '<input type="hidden" name="include_search" value="1">';
 		}
 		if ( ! empty( $request['include_paths'] ) ) {
 			echo '<input type="hidden" name="include_paths" value="1">';
+		}
+		if ( ! empty( $request['include_site_structure'] ) ) {
+			echo '<input type="hidden" name="include_site_structure" value="1">';
+		}
+		if ( ! empty( $request['include_all_post_titles'] ) ) {
+			echo '<input type="hidden" name="include_all_post_titles" value="1">';
 		}
 	}
 }

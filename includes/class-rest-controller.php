@@ -119,6 +119,28 @@ final class Rest_Controller {
 
 		register_rest_route(
 			self::NAMESPACE,
+			'/event',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( Event_Tracker::class, 'record' ),
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'token' => array( 'required' => true, 'type' => 'string' ),
+					'event_id' => array(
+						'required'          => true,
+						'type'              => 'string',
+						'validate_callback' => array( self::class, 'is_uuid' ),
+					),
+					'event_name' => array( 'required' => true, 'type' => 'string' ),
+					'event_location' => array( 'default' => 'content', 'type' => 'string', 'maxLength' => 64 ),
+					'object_type' => array( 'default' => 'link', 'type' => 'string', 'enum' => array( 'link', 'form' ) ),
+					'object_key' => array( 'default' => '', 'type' => 'string', 'maxLength' => 64 ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
 			'/search-console/report',
 			array(
 				'methods'             => 'GET',
@@ -130,6 +152,20 @@ final class Rest_Controller {
 						'type'    => 'string',
 						'enum'    => array( '7d', '28d', '3m' ),
 					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/hour-detail',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( Hourly_Detail::class, 'rest_report' ),
+				'permission_callback' => static fn (): bool => current_user_can( Capabilities::VIEW ),
+				'args'                => array(
+					'date' => array( 'required' => true, 'type' => 'string', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$' ),
+					'hour' => array( 'required' => true, 'type' => 'integer', 'minimum' => 0, 'maximum' => 23 ),
 				),
 			)
 		);

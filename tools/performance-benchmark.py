@@ -62,6 +62,18 @@ def setup(connection: sqlite3.Connection) -> None:
         CREATE TABLE pages (id INTEGER PRIMARY KEY, title TEXT NOT NULL, path TEXT NOT NULL);
         CREATE TABLE daily (stat_date TEXT PRIMARY KEY, visitors INTEGER, visits INTEGER, pageviews INTEGER);
         CREATE TABLE exclusions_daily (stat_date TEXT, reason TEXT, excluded_count INTEGER, PRIMARY KEY(stat_date, reason));
+        CREATE TABLE events (
+            id INTEGER PRIMARY KEY,
+            event_key TEXT NOT NULL UNIQUE,
+            session_id INTEGER NOT NULL,
+            pageview_id INTEGER NOT NULL,
+            page_id INTEGER NOT NULL,
+            event_name TEXT NOT NULL,
+            occurred_at TEXT NOT NULL
+        );
+        CREATE INDEX event_occurred ON events(event_name, occurred_at);
+        CREATE INDEX page_event_occurred ON events(page_id, event_name, occurred_at);
+        CREATE INDEX session_occurred ON events(session_id, occurred_at);
         """
     )
     connection.executemany(
@@ -122,6 +134,22 @@ def grow(connection: sqlite3.Connection, previous: int, target: int) -> None:
             for pageview_id in range(previous + 1, target + 1)
         ),
     )
+    connection.executemany(
+        "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            (
+                pageview_id // 50,
+                f"event-{pageview_id:064d}",
+                (pageview_id + 2) // 3,
+                pageview_id,
+                1 + pageview_id % 500,
+                ("tel_click", "line_click", "form_submit")[pageview_id % 3],
+                stamp(((pageview_id + 2) // 3) % 90, pageview_id % 1440),
+            )
+            for pageview_id in range(previous + 1, target + 1)
+            if pageview_id % 50 == 0
+        ),
+    )
     connection.commit()
     connection.execute("ANALYZE")
 
@@ -142,6 +170,10 @@ def measure(connection: sqlite3.Connection) -> dict[str, float]:
     start_7 = stamp(6)[:10] + " 00:00:00"
     start_day = start_30[:10]
     end_day = end[:10]
+    # One-hour detail uses the same viewed_at/session indexes as production. Attribute
+    # groups share this active-session query shape; device is representative here.
+    start_hour = NOW.strftime("%Y-%m-%d 11:00:00")
+    end_hour = NOW.strftime("%Y-%m-%d 12:00:00")
     queries = {
         "metrics_30d": (
             "SELECT COUNT(*), COUNT(DISTINCT visitor_key) FROM sessions WHERE started_at>=? AND started_at<?",
@@ -184,6 +216,36 @@ def measure(connection: sqlite3.Connection) -> dict[str, float]:
         "exclusions": (
             "SELECT reason,SUM(excluded_count) FROM exclusions_daily WHERE stat_date>=? AND stat_date<? GROUP BY reason",
             (start_day, end_day),
+        ),
+        "conversion_summary_30d": (
+            "SELECT event_name,COUNT(*) FROM events WHERE occurred_at>=? AND occurred_at<? GROUP BY event_name",
+            (start_30, end),
+        ),
+        "conversion_visits_30d": (
+            "SELECT COUNT(DISTINCT session_id) FROM events WHERE occurred_at>=? AND occurred_at<? "
+            "AND event_name IN ('tel_click','line_click','form_submit')",
+            (start_30, end),
+        ),
+        "conversion_pages_30d": (
+            "SELECT e.page_id,p.title,COUNT(*),COUNT(DISTINCT e.session_id) FROM events e JOIN pages p ON p.id=e.page_id "
+            "WHERE e.occurred_at>=? AND e.occurred_at<? AND e.event_name IN ('tel_click','line_click','form_submit') "
+            "GROUP BY e.page_id,p.title ORDER BY COUNT(DISTINCT e.session_id) DESC LIMIT 10",
+            (start_30, end),
+        ),
+        "hour_detail_overview": (
+            "SELECT COUNT(DISTINCT s.visitor_key),COUNT(DISTINCT pv.session_id),COUNT(*) FROM pageviews pv "
+            "JOIN sessions s ON s.id=pv.session_id WHERE pv.viewed_at>=? AND pv.viewed_at<?",
+            (start_hour, end_hour),
+        ),
+        "hour_detail_devices": (
+            "SELECT s.device_type,COUNT(*) FROM sessions s JOIN (SELECT DISTINCT session_id FROM pageviews "
+            "WHERE viewed_at>=? AND viewed_at<?) a ON a.session_id=s.id GROUP BY s.device_type",
+            (start_hour, end_hour),
+        ),
+        "hour_detail_pages": (
+            "SELECT p.title,COUNT(*) total FROM pageviews pv JOIN pages p ON p.id=pv.page_id "
+            "WHERE pv.viewed_at>=? AND pv.viewed_at<? GROUP BY pv.page_id,p.title ORDER BY total DESC LIMIT 5",
+            (start_hour, end_hour),
         ),
     }
     return {name: median_ms(connection, sql, params) for name, (sql, params) in queries.items()}

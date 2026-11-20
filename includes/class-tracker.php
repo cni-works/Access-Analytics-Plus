@@ -11,7 +11,6 @@ use WP_REST_Response;
 final class Tracker {
 	private const SESSION_TIMEOUT = 1800;
 	private const ENGAGEMENT_MAX_SECONDS = 1800;
-	private const ENGAGEMENT_TOKEN_TTL = 2700;
 
 	public static function register(): void {
 		add_action( 'wp_enqueue_scripts', array( self::class, 'enqueue' ) );
@@ -46,7 +45,7 @@ final class Tracker {
 	}
 
 	public static function enqueue(): void {
-		if ( is_admin() || is_feed() || is_robots() || wp_doing_ajax() ) {
+		if ( is_admin() || is_feed() || is_robots() || wp_doing_ajax() || is_preview() || is_customize_preview() ) {
 			return;
 		}
 
@@ -82,6 +81,8 @@ final class Tracker {
 				'endpoint'                 => esc_url_raw( rest_url( 'access-analytics-plus/v1/collect' ) ),
 				'engagementEndpoint'       => esc_url_raw( rest_url( 'access-analytics-plus/v1/engagement' ) ),
 				'shadowEndpoint'           => esc_url_raw( rest_url( 'access-analytics-plus/v1/shadow-signal' ) ),
+				'eventEndpoint'            => esc_url_raw( rest_url( 'access-analytics-plus/v1/event' ) ),
+				'enabledEvents'            => Event_Tracker::enabled_events(),
 				'shadowVisibleSeconds'     => Shadow_Diagnostics::VISIBLE_SECONDS,
 				'sessionTimeout'           => self::SESSION_TIMEOUT,
 				'engagementMaxSeconds'     => self::ENGAGEMENT_MAX_SECONDS,
@@ -96,7 +97,7 @@ final class Tracker {
 			return;
 		}
 
-		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。人間による閲覧を確認してから通常集計へ反映するため、IPアドレスとUser-Agentを復元できないHMAC識別値、国コード、画面表示や操作の有無を最長7日間保存します。IPアドレスはアクセス時に国コードと、日本国内の場合は都道府県コードを推定するためメモリ上で一時利用しますが、生のIPアドレスを解析データとして保存しません。クリック位置、入力内容、User-Agent全文も保存しません。詳細データの初期保存期間は90日です。国・都道府県判定にはDB-IP Lite由来のローカルデータを利用します。', 'access-analytics-plus' ) . '</p>';
+		$content = '<p>' . esc_html__( 'このサイトでは、アクセス傾向を把握するため、匿名のブラウザー識別子、閲覧ページ、流入元、端末分類、ページが画面に表示されていた概算時間をサイト内のデータベースへ保存します。また、設定に応じて電話・LINE・お問い合わせ等の導線クリックと、Contact Form 7の送信成功を記録します。フォームの入力内容、電話番号、リンク先URL、クリック位置は保存しません。人間による閲覧を確認してから通常集計へ反映するため、IPアドレスとUser-Agentを復元できないHMAC識別値、国コード、画面表示や操作の有無を最長7日間保存します。IPアドレスはアクセス時に国コードと、日本国内の場合は都道府県コードを推定するためメモリ上で一時利用しますが、生のIPアドレスを解析データとして保存しません。User-Agent全文も保存しません。詳細データの初期保存期間は90日です。国・都道府県判定にはDB-IP Lite由来のローカルデータを利用します。', 'access-analytics-plus' ) . '</p>';
 		wp_add_privacy_policy_content( 'Access Analytics Plus', wp_kses_post( $content ) );
 	}
 
@@ -208,7 +209,7 @@ final class Tracker {
 		}
 
 		$token = (string) $request->get_param( 'token' );
-		$token_data = str_starts_with( $token, 's.' ) ? Shadow_Diagnostics::accept_engagement( $token ) : self::verify_pageview_token( $token );
+		$token_data = Shadow_Diagnostics::accept_engagement( $token );
 		if ( false === $token_data ) {
 			return new WP_REST_Response( array( 'accepted' => false ), 202 );
 		}
@@ -280,102 +281,6 @@ final class Tracker {
 		$wpdb->query( 'COMMIT' );
 		Shadow_Diagnostics::mark_engagement_received( (int) $pageview['id'] );
 		return new WP_REST_Response( array( 'accepted' => true, 'engaged_seconds' => $seconds ), 200 );
-	}
-
-	/**
-	 * @return WP_REST_Response|WP_Error
-	 */
-	private static function store_pageview( string $visitor_id, string $session_id, string $path, string $title, string $referrer, string $user_agent, string $device_type, int $webdriver_state, bool $origin_present ) {
-		global $wpdb;
-
-		$tables      = Database::tables();
-		$now_utc     = current_time( 'mysql', true );
-		$stat_date   = current_datetime()->format( 'Y-m-d' );
-		$visitor_key = hash_hmac( 'sha256', $visitor_id, wp_salt( 'auth' ) );
-		$session_key = hash_hmac( 'sha256', $session_id, wp_salt( 'secure_auth' ) );
-		$page_id     = self::find_or_create_page( $path, $title, $now_utc );
-
-		if ( ! $page_id ) {
-			return new WP_Error( 'aap_page_error', __( 'ページを記録できませんでした。', 'access-analytics-plus' ), array( 'status' => 500 ) );
-		}
-
-		$session = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT id, last_seen_at FROM {$tables['sessions']} WHERE session_key = %s LIMIT 1",
-				$session_key
-			),
-			ARRAY_A
-		);
-
-		if ( $session ) {
-			if ( strtotime( $now_utc ) - strtotime( (string) $session['last_seen_at'] ) > self::SESSION_TIMEOUT ) {
-				return new WP_REST_Response(
-					array(
-						'accepted'     => false,
-						'reset_session' => true,
-					),
-					409
-				);
-			}
-
-			$session_db_id = (int) $session['id'];
-			$wpdb->query(
-				$wpdb->prepare(
-					"UPDATE {$tables['sessions']} SET last_seen_at = %s, pageview_count = pageview_count + 1 WHERE id = %d",
-					$now_utc,
-					$session_db_id
-				)
-			);
-		} else {
-			$referrer_details = self::classify_referrer( $referrer );
-			$inserted         = $wpdb->insert(
-				$tables['sessions'],
-				array(
-					'session_key'    => $session_key,
-					'visitor_key'    => $visitor_key,
-					'started_at'     => $now_utc,
-					'last_seen_at'   => $now_utc,
-					'entry_page_id'  => $page_id,
-					'pageview_count' => 1,
-					'referrer_type'  => $referrer_details['type'],
-					'referrer_host'  => $referrer_details['host'],
-					'search_source'  => $referrer_details['search_source'],
-					'device_type'    => self::classify_device( $user_agent, $device_type ),
-				),
-				array( '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s' )
-			);
-
-			if ( false === $inserted ) {
-				return new WP_Error( 'aap_session_error', __( '訪問を記録できませんでした。', 'access-analytics-plus' ), array( 'status' => 500 ) );
-			}
-			$session_db_id = (int) $wpdb->insert_id;
-		}
-
-		$inserted = $wpdb->insert(
-			$tables['pageviews'],
-			array(
-				'session_id' => $session_db_id,
-				'page_id'    => $page_id,
-				'viewed_at'  => $now_utc,
-			),
-			array( '%d', '%d', '%s' )
-		);
-
-		if ( false === $inserted ) {
-			return new WP_Error( 'aap_pageview_error', __( '閲覧を記録できませんでした。', 'access-analytics-plus' ), array( 'status' => 500 ) );
-		}
-
-		$pageview_id = (int) $wpdb->insert_id;
-		self::update_daily_totals( $stat_date, $visitor_key, $session_db_id );
-		$token = self::create_engagement_token( $pageview_id );
-
-		return new WP_REST_Response(
-			array(
-				'accepted'        => true,
-				'engagement_token' => $token,
-			),
-			201
-		);
 	}
 
 	/**
@@ -460,37 +365,6 @@ final class Tracker {
 		return (bool) apply_filters( 'aap_test_promotion_failure', false, $stage );
 	}
 
-	private static function create_engagement_token( int $pageview_id ): string {
-		$issued_at = time();
-		$expires   = $issued_at + self::ENGAGEMENT_TOKEN_TTL;
-		$payload   = $pageview_id . '|' . $issued_at . '|' . $expires;
-		$signature = hash_hmac( 'sha256', $payload, wp_salt( 'nonce' ) );
-		return $pageview_id . '.' . $issued_at . '.' . $expires . '.' . $signature;
-	}
-
-	/**
-	 * @return array{pageview_id:int,issued_at:int}|false
-	 */
-	public static function verify_pageview_token( string $token ) {
-		if ( 1 !== preg_match( '/^(\d+)\.(\d+)\.(\d+)\.([a-f0-9]{64})$/', $token, $matches ) ) {
-			return false;
-		}
-
-		$pageview_id = absint( $matches[1] );
-		$issued_at   = absint( $matches[2] );
-		$expires     = absint( $matches[3] );
-		if ( $pageview_id < 1 || $issued_at > time() + 60 || $expires < time() || $expires - $issued_at !== self::ENGAGEMENT_TOKEN_TTL ) {
-			return false;
-		}
-
-		$expected = hash_hmac( 'sha256', $pageview_id . '|' . $issued_at . '|' . $expires, wp_salt( 'nonce' ) );
-		if ( ! hash_equals( $expected, $matches[4] ) ) {
-			return false;
-		}
-
-		return array( 'pageview_id' => $pageview_id, 'issued_at' => $issued_at );
-	}
-
 	private static function find_or_create_page( string $path, string $title, string $now_utc ): int {
 		global $wpdb;
 
@@ -530,40 +404,6 @@ final class Tracker {
 		}
 
 		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT id FROM {$table} WHERE url_hash = %s", $url_hash ) );
-	}
-
-	private static function update_daily_totals( string $date, string $visitor_key, int $session_db_id ): void {
-		global $wpdb;
-
-		$tables = Database::tables();
-		$wpdb->query( 'START TRANSACTION' );
-		$is_new_visit = 1 === $wpdb->query(
-			$wpdb->prepare(
-				"INSERT IGNORE INTO {$tables['daily_dimensions']} (stat_date, dimension_type, dimension_key)
-				VALUES (%s, 'unique_visit', %s)",
-				$date,
-				(string) $session_db_id
-			)
-		);
-		$is_new_visitor = 1 === $wpdb->query(
-			$wpdb->prepare(
-				"INSERT IGNORE INTO {$tables['daily_dimensions']} (stat_date, dimension_type, dimension_key)
-				VALUES (%s, 'unique_visitor', %s)",
-				$date,
-				$visitor_key
-			)
-		);
-
-		$updated = $wpdb->query(
-			$wpdb->prepare(
-				"INSERT INTO {$tables['daily']} (stat_date, visitors, visits, pageviews) VALUES (%s, %d, %d, 1)
-				ON DUPLICATE KEY UPDATE visitors = visitors + VALUES(visitors), visits = visits + VALUES(visits), pageviews = pageviews + 1",
-				$date,
-				$is_new_visitor ? 1 : 0,
-				$is_new_visit ? 1 : 0
-			)
-		);
-		$wpdb->query( false === $updated ? 'ROLLBACK' : 'COMMIT' );
 	}
 
 	private static function update_daily_totals_without_transaction( string $date, string $visitor_key, int $session_db_id ): bool {
@@ -654,6 +494,10 @@ final class Tracker {
 		return strtolower( (string) wp_parse_url( $origin, PHP_URL_HOST ) ) === strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
 	}
 
+	public static function request_is_same_origin( WP_REST_Request $request ): bool {
+		return self::is_same_origin( $request );
+	}
+
 	private static function is_excluded_user(): bool {
 		if ( ! defined( 'LOGGED_IN_COOKIE' ) || empty( $_COOKIE[ LOGGED_IN_COOKIE ] ) ) {
 			return false;
@@ -661,6 +505,10 @@ final class Tracker {
 		$cookie  = wp_unslash( (string) $_COOKIE[ LOGGED_IN_COOKIE ] );
 		$user_id = wp_validate_auth_cookie( $cookie, 'logged_in' );
 		return $user_id > 0 && Settings::is_user_excluded( $user_id );
+	}
+
+	public static function current_user_is_excluded(): bool {
+		return self::is_excluded_user();
 	}
 
 	private static function passes_rate_limit( string $visitor_id ): bool {

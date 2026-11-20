@@ -13,8 +13,37 @@ use WP_REST_Response;
 
 /** Builds a format-neutral, aggregate-only payload for user-initiated AI consultation exports. */
 final class AI_Report {
-	public const SCHEMA_VERSION = 1;
+	public const SCHEMA_VERSION = 2;
 	private const MAX_INPUT_LENGTH = 2000;
+	private const MAX_OTHER_LENGTH = 500;
+	private const RECENT_POST_LIMIT = 20;
+	private const ALL_POST_LIMIT = 300;
+	private const PAGE_LIMIT = 200;
+
+	/** @return array<string,string> */
+	public static function concern_options(): array {
+		return array(
+			'increase_inquiries'  => __( '問い合わせを増やしたい', 'access-analytics-plus' ),
+			'increase_visits'     => __( 'アクセス数を増やしたい', 'access-analytics-plus' ),
+			'improve_search'      => __( 'Google検索からの流入を増やしたい', 'access-analytics-plus' ),
+			'improve_pages'       => __( 'よく見られるページを改善したい', 'access-analytics-plus' ),
+			'understand_visitors' => __( '訪問者の傾向を知りたい', 'access-analytics-plus' ),
+			'explain_changes'     => __( '数字が増減した理由を知りたい', 'access-analytics-plus' ),
+			'other'               => __( 'その他', 'access-analytics-plus' ),
+		);
+	}
+
+	/** @return array<string,string> */
+	public static function advice_options(): array {
+		return array(
+			'summary'       => __( '現状を短く要約してほしい', 'access-analytics-plus' ),
+			'causes'        => __( '数字の理由や課題を分析してほしい', 'access-analytics-plus' ),
+			'priorities'    => __( '優先順位をつけて改善案を示してほしい', 'access-analytics-plus' ),
+			'quick_actions' => __( 'すぐ実行できる具体策がほしい', 'access-analytics-plus' ),
+			'roadmap'       => __( '3か月程度の改善計画を作ってほしい', 'access-analytics-plus' ),
+			'other'         => __( 'その他', 'access-analytics-plus' ),
+		);
+	}
 
 	/** @param array<string,mixed> $source @return array<string,mixed>|WP_Error */
 	public static function normalize_request( array $source ): array|WP_Error {
@@ -27,23 +56,85 @@ final class AI_Report {
 			return $period;
 		}
 
+		$guided = ! empty( $source['guided_input'] );
+		$concern_topics = self::normalize_choices( $source['concern_topics'] ?? array(), self::concern_options() );
+		$advice_types = self::normalize_choices( $source['advice_types'] ?? array(), self::advice_options() );
+		$concern_other = in_array( 'other', $concern_topics, true ) ? self::clean_other( self::scalar_text( $source['concern_other'] ?? '' ) ) : '';
+		$advice_other = in_array( 'other', $advice_types, true ) ? self::clean_other( self::scalar_text( $source['advice_other'] ?? '' ) ) : '';
+		$concern = $guided ? self::choices_text( $concern_topics, self::concern_options(), $concern_other ) : self::clean_text( self::scalar_text( $source['concern'] ?? '' ) );
+		$question = $guided ? self::choices_text( $advice_types, self::advice_options(), $advice_other ) : self::clean_text( self::scalar_text( $source['question'] ?? '' ) );
+
 		$inquiries = null;
-		if ( isset( $source['inquiries'] ) && '' !== trim( (string) $source['inquiries'] ) ) {
-			$inquiries = filter_var( $source['inquiries'], FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 0, 'max_range' => 1000000 ) ) );
+		$accept_inquiries = ! $guided || in_array( 'increase_inquiries', $concern_topics, true );
+		$inquiries_input = self::scalar_text( $source['inquiries'] ?? '' );
+		if ( $accept_inquiries && '' !== trim( $inquiries_input ) ) {
+			$inquiries = filter_var( $inquiries_input, FILTER_VALIDATE_INT, array( 'options' => array( 'min_range' => 0, 'max_range' => 1000000 ) ) );
 			if ( false === $inquiries ) {
 				return new WP_Error( 'aap_ai_report_invalid_inquiries', __( '問い合わせ件数は0以上の整数で入力してください。', 'access-analytics-plus' ) );
 			}
 		}
 
 		return array(
-			'range'            => $range,
-			'period'           => $period,
-			'concern'          => self::clean_text( (string) ( $source['concern'] ?? '' ) ),
-			'question'         => self::clean_text( (string) ( $source['question'] ?? '' ) ),
-			'inquiries'        => $inquiries,
-			'include_search'    => ! empty( $source['include_search'] ),
-			'include_paths'     => ! empty( $source['include_paths'] ),
+			'range'              => $range,
+			'period'             => $period,
+			'guided_input'       => $guided,
+			'concern_topics'     => $concern_topics,
+			'concern_other'      => $concern_other,
+			'advice_types'       => $advice_types,
+			'advice_other'       => $advice_other,
+			'concern'            => $concern,
+			'question'           => $question,
+			'inquiries'          => $inquiries,
+			'inquiries_relevant' => $accept_inquiries,
+			'include_search'     => ! empty( $source['include_search'] ),
+			'include_paths'      => ! empty( $source['include_paths'] ),
+			'include_site_structure' => ! empty( $source['include_site_structure'] ),
+			'include_all_post_titles' => ! empty( $source['include_site_structure'] ) && ! empty( $source['include_all_post_titles'] ),
 		);
+	}
+
+	/** @param mixed $source @param array<string,string> $options @return string[] */
+	private static function normalize_choices( mixed $source, array $options ): array {
+		if ( ! is_array( $source ) ) {
+			return array();
+		}
+		$result = array();
+		foreach ( $source as $value ) {
+			if ( ! is_scalar( $value ) ) {
+				continue;
+			}
+			$key = sanitize_key( (string) $value );
+			if ( isset( $options[ $key ] ) && ! in_array( $key, $result, true ) ) {
+				$result[] = $key;
+			}
+		}
+		return $result;
+	}
+
+	/** @param string[] $choices @param array<string,string> $options */
+	private static function choices_text( array $choices, array $options, string $other ): string {
+		$lines = array();
+		foreach ( $choices as $choice ) {
+			if ( 'other' !== $choice && isset( $options[ $choice ] ) ) {
+				$lines[] = $options[ $choice ];
+			}
+		}
+		if ( in_array( 'other', $choices, true ) && '' !== $other ) {
+			$lines[] = __( 'その他：', 'access-analytics-plus' ) . $other;
+		}
+		return self::clean_text( implode( "\n", $lines ) );
+	}
+
+	private static function clean_other( string $value ): string {
+		$value = sanitize_textarea_field( $value );
+		if ( function_exists( 'mb_substr' ) ) {
+			return mb_substr( $value, 0, self::MAX_OTHER_LENGTH );
+		}
+		return 1 === preg_match( '/^(.{0,' . self::MAX_OTHER_LENGTH . '})/us', $value, $match ) ? $match[1] : substr( $value, 0, self::MAX_OTHER_LENGTH );
+	}
+
+	private static function scalar_text( mixed $value ): string {
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	/** @param array<string,mixed> $request @param array<string,string> $profile @return array<string,mixed>|WP_Error */
@@ -77,6 +168,19 @@ final class AI_Report {
 		$pages = self::popular_public_pages( $period['start'], $period['end_exclusive'], (bool) $request['include_paths'], (int) ( $analytics['metrics']['pageviews']['value'] ?? 0 ) );
 		$countries = self::countries( $period['start'], $period['end_exclusive'] );
 		$search = self::search_console( $request );
+		$site_structure = array( 'included' => false );
+		if ( ! empty( $request['include_site_structure'] ) ) {
+			try {
+				$site_structure = self::site_structure( ! empty( $request['include_all_post_titles'] ), ! empty( $request['include_paths'] ) );
+			} catch ( \Throwable ) {
+				// Site structure is optional. A third-party post type must not prevent the analytics report from being generated.
+				$site_structure = array(
+					'included'  => true,
+					'available' => false,
+					'message'   => __( 'サイト構成を取得できませんでした。アクセス解析レポートのその他の項目は利用できます。', 'access-analytics-plus' ),
+				);
+			}
+		}
 		return self::build_payload(
 			$analytics,
 			$search,
@@ -87,7 +191,8 @@ final class AI_Report {
 				'url'  => esc_url_raw( home_url( '/' ) ),
 			),
 			$pages,
-			$countries
+			$countries,
+			$site_structure
 		);
 	}
 
@@ -101,9 +206,10 @@ final class AI_Report {
 	 * @param array<string,string> $site
 	 * @param array<int,array<string,mixed>> $pages
 	 * @param array<int,array<string,mixed>> $countries
+	 * @param array<string,mixed> $site_structure
 	 * @return array<string,mixed>
 	 */
-	public static function build_payload( array $analytics, array $search, array $request, array $profile, array $site, array $pages, array $countries ): array {
+	public static function build_payload( array $analytics, array $search, array $request, array $profile, array $site, array $pages, array $countries, array $site_structure = array() ): array {
 		$period = $request['period'];
 		$days = (int) $period['start']->diff( $period['end_exclusive'] )->days;
 		$visits = (int) ( $analytics['metrics']['visits']['value'] ?? 0 );
@@ -135,9 +241,10 @@ final class AI_Report {
 				'focus_services' => self::clean_text( $profile['focus_services'] ?? '' ),
 			),
 			'consultation'   => array(
-				'concern'   => self::clean_text( (string) ( $request['concern'] ?? '' ) ),
-				'question'  => self::clean_text( (string) ( $request['question'] ?? '' ) ),
-				'inquiries' => $request['inquiries'] ?? null,
+				'concern'            => self::clean_text( (string) ( $request['concern'] ?? '' ) ),
+				'question'           => self::clean_text( (string) ( $request['question'] ?? '' ) ),
+				'inquiries'          => $request['inquiries'] ?? null,
+				'inquiries_relevant' => (bool) ( $request['inquiries_relevant'] ?? true ),
 			),
 			'period'         => array(
 				'start'            => $period['start']->format( 'Y-m-d' ),
@@ -150,6 +257,7 @@ final class AI_Report {
 			'analytics'      => array(
 				'metrics' => (array) ( $analytics['metrics'] ?? array() ),
 				'quality' => (array) ( $analytics['quality'] ?? array() ),
+				'conversions' => (array) ( $analytics['conversions'] ?? array() ),
 				'sources' => self::normalize_sources( (array) ( $analytics['sources'] ?? array() ) ),
 				'pages'   => array_slice( $pages, 0, 10 ),
 				'devices' => self::normalize_devices( (array) ( $analytics['devices'] ?? array() ) ),
@@ -170,9 +278,151 @@ final class AI_Report {
 				'fetched_at' => (string) ( $search['fetched_at'] ?? '' ),
 				'rows'       => array_slice( (array) ( $search['rows'] ?? array() ), 0, 20 ),
 			),
+			'site_structure' => ! empty( $request['include_site_structure'] )
+				? array_merge( array( 'included' => true ), $site_structure )
+				: array( 'included' => false ),
 			'missing'        => array_values( array_unique( array_filter( $missing ) ) ),
 			'include_paths'  => (bool) ( $request['include_paths'] ?? false ),
 		);
+	}
+
+	/**
+	 * Returns public WordPress structure only. Post content, authors, drafts,
+	 * password-protected content, attachments, and non-public/admin-only post
+	 * types are omitted. Public and publicly queryable custom post types are
+	 * included because they form part of the visitor-facing site structure.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function site_structure( bool $include_all_posts, bool $include_paths ): array {
+		$raw_pages = get_pages(
+			array(
+				'post_status' => 'publish',
+				'sort_column' => 'menu_order,post_title',
+				'sort_order'  => 'ASC',
+				'number'      => self::PAGE_LIMIT + 1,
+			)
+		);
+		$page_truncated = count( $raw_pages ) > self::PAGE_LIMIT;
+		$raw_pages = array_slice( $raw_pages, 0, self::PAGE_LIMIT );
+		$page_ids = array_fill_keys( array_map( static fn ( object $page ): int => (int) $page->ID, $raw_pages ), true );
+		$pages = array();
+		$latest_modified = '';
+		foreach ( $raw_pages as $page ) {
+			if ( ! empty( $page->post_password ) ) {
+				continue;
+			}
+			$modified = self::public_modified_date( (string) ( $page->post_modified_gmt ?? '' ) );
+			if ( $modified > $latest_modified ) { $latest_modified = $modified; }
+			$item = array(
+				'title' => self::clean_text( get_the_title( $page ) ),
+				'depth' => self::page_depth( $page, $raw_pages, $page_ids ),
+			);
+			if ( $include_paths ) {
+				$path = self::public_path( (string) get_permalink( $page ) );
+				if ( null !== $path ) { $item['path'] = $path; }
+			}
+			$pages[] = $item;
+		}
+
+		$post_types = get_post_types( array( 'public' => true, 'publicly_queryable' => true ), 'objects' );
+		unset( $post_types['page'], $post_types['attachment'] );
+		uasort(
+			$post_types,
+			static function ( object $left, object $right ): int {
+				if ( 'post' === $left->name ) { return -1; }
+				if ( 'post' === $right->name ) { return 1; }
+				return strnatcasecmp( (string) $left->label, (string) $right->label );
+			}
+		);
+		$post_types = array_slice( $post_types, 0, 10, true );
+		$content_types = array();
+		$remaining_all = self::ALL_POST_LIMIT;
+		$published_posts = 0;
+		foreach ( $post_types as $post_type ) {
+			$type_key = sanitize_key( (string) $post_type->name );
+			if ( '' === $type_key ) { continue; }
+			$counts = wp_count_posts( $type_key );
+			$published = isset( $counts->publish ) ? max( 0, (int) $counts->publish ) : 0;
+			if ( 'post' === $type_key ) { $published_posts = $published; }
+			$display_limit = $include_all_posts ? min( $remaining_all, $published ) : min( self::RECENT_POST_LIMIT, $published );
+			$raw_posts = $display_limit > 0 ? get_posts(
+				array(
+					'post_type'              => $type_key,
+					'post_status'            => 'publish',
+					'posts_per_page'         => $display_limit + 1,
+					'orderby'                => 'modified',
+					'order'                  => 'DESC',
+					'no_found_rows'          => true,
+					'ignore_sticky_posts'    => true,
+					'update_post_meta_cache' => false,
+					'update_post_term_cache' => false,
+				)
+			) : array();
+			$posts = array();
+			foreach ( array_slice( $raw_posts, 0, $display_limit ) as $post ) {
+				if ( ! empty( $post->post_password ) ) { continue; }
+				$modified = self::public_modified_date( (string) ( $post->post_modified_gmt ?? '' ) );
+				if ( $modified > $latest_modified ) { $latest_modified = $modified; }
+				$item = array( 'title' => self::clean_text( get_the_title( $post ) ), 'modified' => $modified );
+				if ( $include_paths ) {
+					$path = self::public_path( (string) get_permalink( $post ) );
+					if ( null !== $path ) { $item['path'] = $path; }
+				}
+				$posts[] = $item;
+			}
+			if ( $include_all_posts ) { $remaining_all = max( 0, $remaining_all - count( $posts ) ); }
+			$content_types[] = array(
+				'key'       => $type_key,
+				'label'     => self::clean_text( (string) $post_type->label ),
+				'count'     => $published,
+				'posts'     => $posts,
+				'truncated' => count( $raw_posts ) > $display_limit || $published > count( $posts ),
+			);
+		}
+
+		$categories = array();
+		foreach ( get_categories( array( 'hide_empty' => true, 'orderby' => 'count', 'order' => 'DESC' ) ) as $category ) {
+			$categories[] = array( 'name' => self::clean_text( (string) $category->name ), 'count' => max( 0, (int) $category->count ) );
+		}
+
+		return array(
+			'included'                => true,
+			'available'               => true,
+			'published_pages'         => count( $pages ),
+			'published_posts'         => $published_posts,
+			'last_modified'           => $latest_modified,
+			'pages'                   => $pages,
+			'pages_truncated'         => $page_truncated,
+			'categories'              => $categories,
+			'content_types'            => $content_types,
+			'all_post_titles'         => $include_all_posts,
+			'post_title_limit'        => $include_all_posts ? self::ALL_POST_LIMIT : self::RECENT_POST_LIMIT,
+		);
+	}
+
+	/** @param object[] $pages @param array<int,bool> $page_ids */
+	private static function page_depth( object $page, array $pages, array $page_ids ): int {
+		$parents = array();
+		foreach ( $pages as $candidate ) { $parents[ (int) $candidate->ID ] = (int) $candidate->post_parent; }
+		$depth = 0;
+		$parent = (int) ( $page->post_parent ?? 0 );
+		$seen = array();
+		while ( $parent > 0 && isset( $page_ids[ $parent ] ) && ! isset( $seen[ $parent ] ) && $depth < 10 ) {
+			$seen[ $parent ] = true;
+			++$depth;
+			$parent = $parents[ $parent ] ?? 0;
+		}
+		return $depth;
+	}
+
+	private static function public_modified_date( string $gmt ): string {
+		if ( '' === $gmt || '0000-00-00 00:00:00' === $gmt ) { return ''; }
+		try {
+			return ( new DateTimeImmutable( $gmt, new DateTimeZone( 'UTC' ) ) )->setTimezone( wp_timezone() )->format( 'Y-m-d' );
+		} catch ( \Exception ) {
+			return '';
+		}
 	}
 
 	/** @return array<string,mixed> */

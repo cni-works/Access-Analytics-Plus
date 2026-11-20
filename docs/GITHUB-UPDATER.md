@@ -45,4 +45,4 @@ HTTP、JSON、Release検証の失敗は例外として本体へ伝播させず�
 
 `0.1.2`のUpdaterは安定版だけを対象としているため、最初の`0.5.0-beta`は手動導入する。`0.5.0-beta`以降はベータチャンネルが有効になり、`0.5.1-beta`等をWordPress標準更新通知で取得できる。
 
-正式版へ移行するときは`include_prereleases`を無効化し、安定版利用者へ将来のPre-releaseを自動配布しない。
+正式版では`include_prereleases`を標準で無効化し、安定版利用者へ将来のPre-releaseを自動配布しない。モニターサイトだけが`AAP_INCLUDE_PRERELEASES`定数、または`aap_include_prereleases`フィルターで明示的に有効化する。

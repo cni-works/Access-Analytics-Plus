@@ -189,12 +189,7 @@ final class Shadow_Diagnostics {
 		$token = (string) $request->get_param( 'token' );
 		$data  = self::verify_token( $token );
 		if ( false === $data ) {
-			$legacy = Tracker::verify_pageview_token( $token );
-			if ( false === $legacy ) {
-				return new WP_Error( 'aap_invalid_shadow_token', __( '診断情報の有効期限が切れています。', 'access-analytics-plus' ), array( 'status' => 403 ) );
-			}
-			self::update_legacy_signal( $legacy['pageview_id'], (bool) $request->get_param( 'visible_confirmed' ), absint( $request->get_param( 'interaction_mask' ) ) );
-			return new WP_REST_Response( array( 'accepted' => true, 'legacy' => true ), 200 );
+			return new WP_Error( 'aap_invalid_shadow_token', __( '診断情報の有効期限が切れています。', 'access-analytics-plus' ), array( 'status' => 403 ) );
 		}
 
 		$result = self::update_signal( $data['event_id'], (bool) $request->get_param( 'visible_confirmed' ), absint( $request->get_param( 'interaction_mask' ) ), false );
@@ -217,6 +212,44 @@ final class Shadow_Diagnostics {
 		global $wpdb;
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT pageview_id FROM ' . Database::tables()['shadow_events'] . ' WHERE id=%d', $data['event_id'] ), ARRAY_A );
 		return $row && (int) $row['pageview_id'] > 0 ? array( 'pageview_id' => (int) $row['pageview_id'], 'issued_at' => $data['issued_at'] ) : false;
+	}
+
+	/**
+	 * Treats a semantic CTA/form event as a direct interaction signal and returns
+	 * only the confirmed relational context needed by the event recorder.
+	 *
+	 * @return array{confirmed:bool,class:string,pageview_id?:int,session_id?:int,page_id?:int,error?:bool}
+	 */
+	public static function accept_event( string $token ): array {
+		$data = self::verify_token( $token );
+		if ( false === $data ) {
+			return array( 'confirmed' => false, 'class' => 'invalid' );
+		}
+		$result = self::update_signal( $data['event_id'], false, self::INTERACTION_POINTER, false );
+		if ( ! $result['success'] ) {
+			return array( 'confirmed' => false, 'class' => (string) $result['class'], 'error' => true );
+		}
+		global $wpdb;
+		$row = $wpdb->get_row(
+			$wpdb->prepare(
+				'SELECT se.shadow_class,se.pageview_id,se.session_id,pv.page_id FROM ' . Database::tables()['shadow_events'] . ' se LEFT JOIN ' . Database::tables()['pageviews'] . ' pv ON pv.id=se.pageview_id WHERE se.id=%d LIMIT 1',
+				$data['event_id']
+			),
+			ARRAY_A
+		);
+		if ( ! $row ) {
+			return array( 'confirmed' => false, 'class' => 'missing', 'error' => true );
+		}
+		if ( 'confirmed' !== (string) $row['shadow_class'] || (int) $row['pageview_id'] < 1 || (int) $row['session_id'] < 1 || (int) $row['page_id'] < 1 ) {
+			return array( 'confirmed' => false, 'class' => (string) $row['shadow_class'] );
+		}
+		return array(
+			'confirmed'   => true,
+			'class'       => 'confirmed',
+			'pageview_id' => (int) $row['pageview_id'],
+			'session_id'  => (int) $row['session_id'],
+			'page_id'     => (int) $row['page_id'],
+		);
 	}
 
 	public static function mark_engagement_received( int $pageview_id ): void {
@@ -476,11 +509,6 @@ final class Shadow_Diagnostics {
 		if ( $id < 1 || $issued > time() + 60 || $expires < time() || $expires - $issued !== self::TOKEN_TTL ) { return false; }
 		$expected = hash_hmac( 'sha256', 's|' . $id . '|' . $issued . '|' . $expires, wp_salt( 'nonce' ) );
 		return hash_equals( $expected, $matches[4] ) ? array( 'event_id' => $id, 'issued_at' => $issued ) : false;
-	}
-
-	private static function update_legacy_signal( int $pageview, bool $visible, int $mask ): void {
-		global $wpdb;
-		$wpdb->query( $wpdb->prepare( 'UPDATE ' . Database::tables()['shadow_events'] . " SET visible_confirmed=GREATEST(visible_confirmed,%d),interaction_mask=interaction_mask | %d WHERE pageview_id=%d AND aggregation_mode='legacy'", $visible ? 1 : 0, min( 15, $mask ), $pageview ) );
 	}
 
 	private static function identifier_hmac( string $value, string $context ): string { return hash_hmac( 'sha256', $context . '|' . $value, wp_salt( 'secure_auth' ) ); }

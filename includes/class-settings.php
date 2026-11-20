@@ -159,6 +159,9 @@ final class Settings {
 		$geoip_status = GeoIP_Database::status();
 		$region_status = Region_Database::status();
 		$collect_failure = Shadow_Diagnostics::last_collect_failure();
+		$event_definitions = Event_Tracker::definitions();
+		$enabled_events = Event_Tracker::enabled_events();
+		$conversion_events = Event_Tracker::conversion_events();
 		$geoip_update_url = wp_nonce_url(
 			add_query_arg( 'action', 'aap_update_geoip', admin_url( 'admin-post.php' ) ),
 			'aap_update_geoip'
@@ -204,6 +207,22 @@ final class Settings {
 							<option value="<?php echo esc_attr( (string) $days ); ?>" <?php selected( $retention, $days ); ?>><?php echo esc_html( sprintf( __( '%d日', 'access-analytics-plus' ), $days ) ); ?></option>
 						<?php endforeach; ?>
 					</select><small><?php esc_html_e( '個別の閲覧・訪問データだけを削除し、日別の合計値は保持します。', 'access-analytics-plus' ); ?></small></label>
+				</section>
+
+				<section class="aap-settings-card">
+					<h2><?php esc_html_e( '問い合わせ・成果の計測', 'access-analytics-plus' ); ?></h2>
+					<p class="description"><?php esc_html_e( '電話・LINE等の導線クリックとContact Form 7の送信成功を記録します。CV数は、成果として選んだ操作が1回以上あった訪問数です。', 'access-analytics-plus' ); ?></p>
+					<div class="aap-event-settings">
+						<div class="aap-event-settings-head"><span><?php esc_html_e( '操作', 'access-analytics-plus' ); ?></span><span><?php esc_html_e( '計測', 'access-analytics-plus' ); ?></span><span><?php esc_html_e( 'CVとして扱う', 'access-analytics-plus' ); ?></span></div>
+						<?php foreach ( $event_definitions as $event_key => $definition ) : ?>
+							<div class="aap-event-setting-row">
+								<strong><?php echo esc_html( $definition['label'] ); ?></strong>
+								<label><input type="checkbox" name="enabled_events[]" value="<?php echo esc_attr( $event_key ); ?>" <?php checked( in_array( $event_key, $enabled_events, true ) ); ?>> <span class="screen-reader-text"><?php echo esc_html( $definition['label'] . 'を計測' ); ?></span></label>
+								<label><input type="checkbox" name="conversion_events[]" value="<?php echo esc_attr( $event_key ); ?>" <?php checked( in_array( $event_key, $conversion_events, true ) ); ?>> <span class="screen-reader-text"><?php echo esc_html( $definition['label'] . 'をCVとして扱う' ); ?></span></label>
+							</div>
+						<?php endforeach; ?>
+					</div>
+					<p class="description"><?php esc_html_e( 'お問い合わせ・地図など自動判別できないボタンには、data-aap-event="contact_click" または data-aap-event="map_click" を指定します。位置はdata-aap-location="header"のように指定できます。', 'access-analytics-plus' ); ?></p>
 				</section>
 
 				<section class="aap-settings-card">
@@ -360,6 +379,7 @@ final class Settings {
 		check_admin_referer( 'aap_save_settings' );
 
 		update_option( self::OPTION_ACTIVE, isset( $_POST['tracking_active'] ) ? 1 : 0, false );
+		Event_Tracker::save_settings( $_POST['enabled_events'] ?? array(), $_POST['conversion_events'] ?? array() );
 
 		$allowed_roles = array_keys( wp_roles()->roles );
 		$posted_roles  = isset( $_POST['excluded_roles'] ) && is_array( $_POST['excluded_roles'] ) ? wp_unslash( $_POST['excluded_roles'] ) : array();

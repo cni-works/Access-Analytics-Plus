@@ -38,6 +38,8 @@ function environment(options = {}) {
         endpoint: '/collect',
         engagementEndpoint: '/engagement',
         shadowEndpoint: '/shadow-signal',
+        eventEndpoint: '/event',
+        enabledEvents: ['line_click', 'tel_click', 'contact_click', 'form_submit', 'map_click'],
         shadowVisibleSeconds: 3,
         sessionTimeout: 1800,
         engagementMaxSeconds: 1800,
@@ -93,7 +95,7 @@ function environment(options = {}) {
   return {
     context, document, events, windowEvents, intervals, timeouts, requests,
     setNow(value) { now = value; },
-    fireDocument(name) { (events[name] || []).forEach((callback) => callback()); },
+    fireDocument(name, event = {}) { (events[name] || []).forEach((callback) => callback(event)); },
     fireWindow(name) { (windowEvents[name] || []).forEach((callback) => callback()); }
   };
 }
@@ -111,6 +113,30 @@ function environment(options = {}) {
 	assert.match(firstPayload.collect_id, /^[a-f0-9-]{36}$/i, 'each page load sends an idempotency ID');
   assert.equal(firstPayload.webdriver, 0, 'webdriver state must be sent without changing normal collection');
   assert.equal(firstPayload.tracker_build, 'beta.test', 'tracker build must accompany collection');
+
+	const telLink = {
+		getAttribute(name) { return name === 'href' ? 'tel:0312345678' : ''; },
+		closest(selector) {
+			if (selector === 'a[href], [data-aap-event]') return this;
+			if (selector === 'header') return {};
+			return null;
+		}
+	};
+	first.fireDocument('click', { target: telLink });
+	await new Promise((resolve) => setImmediate(resolve));
+	const telRequest = first.requests.find((request) => request.url === '/event');
+	assert.ok(telRequest, 'a telephone link emits an event request after collect succeeds');
+	const telPayload = JSON.parse(telRequest.body);
+	assert.equal(telPayload.event_name, 'tel_click');
+	assert.equal(telPayload.event_location, 'header');
+	assert.match(telPayload.event_id, /^[a-f0-9-]{36}$/i, 'event requests carry an idempotency ID');
+
+	first.fireDocument('wpcf7mailsent', { target: { closest() { return null; } }, detail: { contactFormId: 17, inputs: [{ name: 'email', value: 'secret@example.test' }] } });
+	await new Promise((resolve) => setImmediate(resolve));
+	const formRequest = first.requests.filter((request) => request.url === '/event').map((request) => JSON.parse(request.body)).find((payload) => payload.event_name === 'form_submit');
+	assert.ok(formRequest, 'Contact Form 7 success emits an event request');
+	assert.equal(formRequest.object_key, '17');
+	assert.ok(!JSON.stringify(formRequest).includes('secret@example.test'), 'form values are never included in the event payload');
 
 	const collectRetry = environment({ collectFailures: 1 });
 	await new Promise((resolve) => setImmediate(resolve));

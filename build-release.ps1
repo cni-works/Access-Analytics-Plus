@@ -24,6 +24,10 @@ if (-not $stableTagMatch.Success) { throw 'Unable to read Stable tag from readme
 if (-not (Test-Path -LiteralPath $updaterFile -PathType Leaf)) {
 	throw 'GitHub updater is missing: includes/updater/class-github-release-updater.php.'
 }
+$eventTrackerFile = Join-Path $projectRoot 'includes/class-event-tracker.php'
+if (-not (Test-Path -LiteralPath $eventTrackerFile -PathType Leaf)) {
+	throw 'Event tracker is missing: includes/class-event-tracker.php.'
+}
 
 $version = $versionMatch.Groups[1].Value
 $updateUri = $updateUriMatch.Groups[1].Value
@@ -128,6 +132,8 @@ try {
 	if ($entryNames -notcontains "$slug/includes/class-ai-report.php") { $errors.Add('The AI report payload builder is missing.') }
 	if ($entryNames -notcontains "$slug/includes/class-ai-report-markdown.php") { $errors.Add('The AI report Markdown renderer is missing.') }
 	if ($entryNames -notcontains "$slug/includes/class-ai-report-admin.php") { $errors.Add('The AI report admin controller is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-hourly-detail.php") { $errors.Add('The hourly detail controller is missing.') }
+	if ($entryNames -notcontains "$slug/includes/class-event-tracker.php") { $errors.Add('The event tracker is missing.') }
 	if ($entryNames -notcontains "$slug/assets/js/ai-report.js") { $errors.Add('The AI report admin script is missing.') }
 	if ($entryNames -notcontains "$slug/data/dbip-country-lite-2026-09.mmdb") { $errors.Add('The bundled DB-IP Country Lite database is missing.') }
 	if ($entryNames -notcontains "$slug/data/aap-japan-prefecture-2026-09.mmdb") { $errors.Add('The bundled Japan prefecture database is missing.') }

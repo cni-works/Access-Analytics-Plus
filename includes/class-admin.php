@@ -57,9 +57,11 @@ final class Admin {
 			'aapAdmin',
 			array(
 				'reportEndpoint' => esc_url_raw( rest_url( 'access-analytics-plus/v1/report' ) ),
+				'hourDetailEndpoint' => esc_url_raw( rest_url( 'access-analytics-plus/v1/hour-detail' ) ),
 				'searchConsoleEndpoint' => esc_url_raw( rest_url( 'access-analytics-plus/v1/search-console/report' ) ),
 				'nonce'          => wp_create_nonce( 'wp_rest' ),
 				'analyticsUrl'   => esc_url_raw( admin_url( 'admin.php?page=' . self::PAGE_SLUG ) ),
+				'siteUrl'        => esc_url_raw( home_url( '/' ) ),
 				'today'          => current_datetime()->format( 'Y-m-d' ),
 				'strings'        => array(
 					'loading' => __( '読み込み中…', 'access-analytics-plus' ),
@@ -143,18 +145,35 @@ final class Admin {
 					<summary><?php esc_html_e( '日ごとの数字を見る', 'access-analytics-plus' ); ?></summary>
 					<div data-aap-timeseries-list></div>
 				</details>
+				<section class="aap-hour-detail" data-aap-hour-detail hidden tabindex="-1" aria-live="polite"></section>
+			</section>
+
+			<section class="aap-panel aap-conversion-panel" data-aap-conversions hidden>
+				<div class="aap-section-heading">
+					<h2><?php esc_html_e( '問い合わせ・成果', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'CV数は、設定で成果として選んだ操作が1回以上あった訪問数です。同じ訪問で複数回クリックしてもCV訪問は1回として数えます。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( 'CV集計の説明', 'access-analytics-plus' ); ?>">?</button></h2>
+				</div>
+				<div class="aap-conversion-summary" data-aap-conversion-summary></div>
+				<div class="aap-conversion-events" data-aap-conversion-events></div>
+				<div class="aap-conversion-pages" data-aap-conversion-pages></div>
+				<p class="aap-region-note" data-aap-conversion-note></p>
 			</section>
 
 			<div class="aap-grid">
 				<section class="aap-panel"><h2><?php esc_html_e( 'どこから来た？', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'ダイレクトには、参照元を確認できなかった訪問も含まれます。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( '流入元の説明', 'access-analytics-plus' ); ?>">?</button></h2><div data-aap-sources></div><div class="aap-source-details" data-aap-source-details></div></section>
 				<section class="aap-panel"><h2><?php esc_html_e( 'よく見られているページ', 'access-analytics-plus' ); ?></h2><div data-aap-pages></div></section>
 			</div>
-			<section class="aap-panel aap-region-panel">
-				<h2><?php esc_html_e( 'アクセス地域（推定）', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'IPアドレスから推定した都道府県です。携帯回線・VPN・企業ネットワーク等では、実際の所在地と異なる場合があります。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( '都道府県分析の説明', 'access-analytics-plus' ); ?>">?</button></h2>
-				<div data-aap-regions></div>
-				<p class="aap-region-note"><?php esc_html_e( '日本国内のconfirmedアクセスだけを、期間内の一意な訪問者数で表示します。', 'access-analytics-plus' ); ?></p>
-				<p class="aap-geoip-attribution"><a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a></p>
-			</section>
+			<div class="aap-grid aap-insight-grid">
+				<section class="aap-panel aap-device-panel">
+					<h2><?php esc_html_e( 'デバイス', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'スマートフォン、PC、タブレットのおおよその割合です。端末の設定により実際と異なる場合があります。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( 'デバイス分類の説明', 'access-analytics-plus' ); ?>">?</button></h2>
+					<div class="aap-device-content" data-aap-devices></div>
+				</section>
+				<section class="aap-panel aap-region-panel">
+					<h2><?php esc_html_e( 'アクセス地域（推定）', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'IPアドレスから推定した都道府県です。携帯回線・VPN・企業ネットワーク等では、実際の所在地と異なる場合があります。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( '都道府県分析の説明', 'access-analytics-plus' ); ?>">?</button></h2>
+					<div data-aap-regions></div>
+					<p class="aap-region-note"><?php esc_html_e( '日本国内のconfirmedアクセスだけを、期間内の一意な訪問者数で表示します。', 'access-analytics-plus' ); ?></p>
+					<p class="aap-geoip-attribution"><a href="<?php echo esc_url( GeoIP_Database::PROVIDER_URL ); ?>" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a></p>
+				</section>
+			</div>
 			<?php if ( $site_kit_is_installed ) : ?>
 			<section class="aap-panel aap-search-console" data-aap-search-console data-range="28d">
 				<div class="aap-section-heading">
@@ -171,10 +190,6 @@ final class Admin {
 				<p class="aap-search-console-note" data-aap-search-console-note></p>
 			</section>
 			<?php endif; ?>
-			<section class="aap-panel aap-device-panel">
-				<h2><?php esc_html_e( 'デバイス', 'access-analytics-plus' ); ?> <button type="button" class="aap-help" data-help="<?php esc_attr_e( 'スマートフォン、PC、タブレットのおおよその割合です。端末の設定により実際と異なる場合があります。', 'access-analytics-plus' ); ?>" aria-label="<?php esc_attr_e( 'デバイス分類の説明', 'access-analytics-plus' ); ?>">?</button></h2>
-				<div class="aap-device-content" data-aap-devices></div>
-			</section>
 			<details class="aap-exclusions" data-aap-exclusions>
 				<summary><span><?php esc_html_e( 'この期間に除外したアクセス', 'access-analytics-plus' ); ?></span><strong data-aap-exclusions-total>0件</strong></summary>
 				<div class="aap-exclusion-items" data-aap-exclusion-items></div>

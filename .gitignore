@@ -6,6 +6,7 @@ release/
 .env.*
 !.env.example
 node_modules/
+tools/*.sqlite
 desktop.ini
 Thumbs.db
 .DS_Store

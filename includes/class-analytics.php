@@ -82,6 +82,7 @@ final class Analytics {
 		$previous_quality = self::quality_metrics( $period['previous_start'], $period['start'] );
 		$current_pages_per_visit  = $current['visits'] > 0 ? round( $current['pageviews'] / $current['visits'], 1 ) : null;
 		$previous_pages_per_visit = $previous['visits'] > 0 ? round( $previous['pageviews'] / $previous['visits'], 1 ) : null;
+		$conversions = Event_Tracker::report( $period['start'], $period['end_exclusive'], $current['visits'] );
 
 		$payload = array(
 				'period'     => array(
@@ -110,6 +111,7 @@ final class Analytics {
 				'pages'      => self::popular_pages( $period['start'], $period['end_exclusive'] ),
 				'regions'    => self::regions( $period['start'], $period['end_exclusive'] ),
 				'devices'    => self::devices( $period['start'], $period['end_exclusive'] ),
+				'conversions' => $conversions,
 				'exclusions' => self::exclusions( $period['start'], $period['end_exclusive'] ),
 				'dashboard'  => null,
 				'updated_at' => current_datetime()->format( 'Y-m-d H:i' ),

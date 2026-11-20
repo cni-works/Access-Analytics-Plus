@@ -15,7 +15,25 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
         <label><input type="radio" name="report_range" value="custom"><span>期間指定</span></label>
       </div></fieldset>
       <div class="aap-ai-custom-period" data-aap-ai-custom-period hidden><label>開始日<input type="date"></label><label>終了日<input type="date"></label><span>最大90日</span></div>
-      <label><strong>今回AIに相談したい内容</strong><textarea rows="3">SEO改善</textarea></label></div>
+      <fieldset class="aap-ai-choice-group"><legend><strong>今、気になっていることは？</strong><small>複数選択できます</small></legend><div class="aap-ai-choices">
+        <label class="aap-ai-choice"><input type="checkbox" name="concern_topics[]" value="increase_inquiries"><span>問い合わせを増やしたい</span></label>
+        <label class="aap-ai-choice"><input type="checkbox" name="concern_topics[]" value="increase_visits"><span>アクセス数を増やしたい</span></label>
+        <label class="aap-ai-choice"><input type="checkbox" name="concern_topics[]" value="other"><span>その他</span></label>
+      </div></fieldset>
+      <div class="aap-ai-conditional" data-aap-concern-other hidden><label><strong>その他の気になること</strong><textarea name="concern_other" disabled></textarea></label></div>
+      <div class="aap-ai-conditional" data-aap-inquiries hidden><label><strong>期間中の問い合わせ件数（任意）</strong><input type="number" name="inquiries" disabled></label></div>
+      <fieldset class="aap-ai-choice-group"><legend><strong>AIにどんな形で答えてほしいですか？</strong><small>欲しい回答を複数選択できます</small></legend><div class="aap-ai-choices">
+        <label class="aap-ai-choice"><input type="checkbox" name="advice_types[]" value="priorities"><span>優先順位をつけて改善案を示してほしい</span></label>
+        <label class="aap-ai-choice"><input type="checkbox" name="advice_types[]" value="other"><span>その他</span></label>
+      </div></fieldset>
+      <div class="aap-ai-conditional" data-aap-advice-other hidden><label><strong>その他にAIへ相談したいこと</strong><textarea name="advice_other" disabled></textarea></label></div>
+      <fieldset class="aap-ai-report-options"><legend><strong>レポートに含める情報</strong></legend><p>チェックした情報はダウンロードするレポートへ追加され、STEP 2のプレビューで確認できます。</p><div class="aap-ai-options">
+        <label class="aap-ai-option"><input type="checkbox" name="include_site_structure" value="1" checked><span><strong>現在のサイト構成を含める</strong><small>最近更新されたタイトルを種類ごとに最大20件含めます。通常はこちらだけで十分です。</small></span></label>
+        <div class="aap-ai-conditional" data-aap-all-post-titles><label class="aap-ai-option"><input type="checkbox" name="include_all_post_titles" value="1"><span><strong>公開記事のタイトルを詳しく含める（最大300件）</strong><small>最近の20件だけでは足りない場合に利用します。</small></span></label></div>
+        <label class="aap-ai-option"><input type="checkbox" name="include_paths" checked><span><strong>ページの場所（URL）を含める</strong><small>人気ページに「/service/」のような場所を添え、AIが改善対象のページを区別しやすくします。</small></span></label>
+        <label class="aap-ai-option"><input type="checkbox" name="include_search" checked><span><strong>Google検索データを含める</strong><small>Site Kitから検索語句・クリック数・表示回数・CTR・平均順位を加え、SEOの相談に役立てます。</small></span></label>
+      </div></fieldset>
+      </div>
       <button class="button button-primary button-hero">レポートを作成して確認</button>
     </form>
   </section>
@@ -39,6 +57,31 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   assert.equal(await custom.isVisible(), true, 'custom date fields appear on selection');
   await page.locator('input[name="report_range"][value="7d"]').check({ force: true });
   assert.equal(await custom.isVisible(), false, 'preset hides custom date fields');
+  const inquiries = page.locator('[data-aap-inquiries]');
+  assert.equal(await inquiries.isVisible(), false, 'inquiry count starts hidden');
+  assert.equal(await inquiries.locator('input').isDisabled(), true, 'hidden inquiry count is not submitted');
+  await page.locator('input[name="concern_topics[]"][value="increase_inquiries"]').check({ force: true });
+  assert.equal(await inquiries.isVisible(), true, 'inquiry goal reveals inquiry count');
+  assert.equal(await inquiries.locator('input').isEnabled(), true, 'revealed inquiry count is submitted');
+  await page.locator('input[name="concern_topics[]"][value="increase_inquiries"]').uncheck({ force: true });
+  assert.equal(await inquiries.isVisible(), false, 'removing inquiry goal hides inquiry count again');
+  const concernOther = page.locator('[data-aap-concern-other]');
+  await page.locator('input[name="concern_topics[]"][value="other"]').check({ force: true });
+  assert.equal(await concernOther.isVisible(), true, 'other concern reveals short free input');
+  const adviceOther = page.locator('[data-aap-advice-other]');
+  await page.locator('input[name="advice_types[]"][value="other"]').check({ force: true });
+  assert.equal(await adviceOther.isVisible(), true, 'other advice reveals short free input');
+  const allTitles = page.locator('[data-aap-all-post-titles]');
+  assert.equal(await allTitles.isVisible(), true, 'all-title option is available with site structure');
+  await page.locator('input[name="include_site_structure"]').uncheck({ force: true });
+  assert.equal(await allTitles.isVisible(), false, 'all-title option hides with site structure disabled');
+  assert.equal(await allTitles.locator('input').isDisabled(), true, 'hidden all-title option is not submitted');
+  await page.locator('input[name="include_site_structure"]').check({ force: true });
+  assert.equal(await allTitles.isVisible(), true, 'all-title option returns with site structure enabled');
+  assert.match(await page.locator('input[name="include_site_structure"]').locator('..').innerText(), /種類ごとに最大20件/);
+  assert.match(await allTitles.innerText(), /最近の20件だけでは足りない場合/);
+  assert.match(await page.locator('input[name="include_paths"]').locator('..').innerText(), /AIが改善対象のページを区別/);
+  assert.match(await page.locator('input[name="include_search"]').locator('..').innerText(), /クリック数・表示回数・CTR・平均順位/);
   assert.equal(await page.locator('.aap-ai-step').count(), 4, 'four-step workflow remains explicit');
   assert.match(await page.locator('.aap-ai-preview').innerText(), /Webサイト改善相談用レポート/);
   for (const width of [320, 375, 1280]) {
@@ -46,6 +89,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok(overflow <= 1, `${width}px AI report page overflows horizontally by ${overflow}px`);
   }
+  if (process.env.AAP_AI_UI_SCREENSHOT) await page.screenshot({ path: process.env.AAP_AI_UI_SCREENSHOT, fullPage: true });
   console.log('AI report UI regression checks passed.');
   await browser.close();
 })().catch((error) => { console.error(error); process.exitCode = 1; });

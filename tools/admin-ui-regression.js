@@ -79,7 +79,18 @@ function reportFor(url) {
     timeseries,
     sources: [{ label: '検索', percent: 60 }],
     source_details: { search: [], social: [] },
-    pages: [{ title: '会社案内', pageviews: 5 }],
+    pages: [{ title: '会社案内', path: '/company/', pageviews: 5 }],
+    conversions: {
+      conversion_visits: 2,
+      conversion_rate: 20,
+      definition_note: 'CV数は、設定した成果イベントが1回以上あった訪問数です。',
+      items: [
+        { key: 'tel_click', label: '電話クリック', value: 3, conversion: true },
+        { key: 'map_click', label: '地図クリック', value: 1, conversion: false },
+        { key: 'line_click', label: 'LINEクリック', value: 0, conversion: true },
+      ],
+      pages: [{ title: 'お問い合わせ', cv_visits: 2, viewing_visits: 5, cv_rate: 40, event_count: 3 }],
+    },
     regions: {
       total: 12,
       items: [
@@ -94,7 +105,7 @@ function reportFor(url) {
       ],
       tracking_started: '2026-08-01 00:00:00', partial: false,
     },
-    devices: [{ label: 'スマートフォン', percent: 70 }],
+    devices: [{ label: 'スマートフォン', value: 7, percent: 70 }, { label: 'PC', value: 3, percent: 30 }],
     exclusions: { total: 1, items: [{ label: 'Bot', value: 1 }] },
     dashboard: dashboardContext ? {
       metrics: { visitors: metric(visitors), pageviews: metric(pageviews) },
@@ -122,14 +133,14 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   </div>
   </div><div class="aap-overview-metrics"><div data-aap-status></div><div class="aap-metrics" data-aap-metrics></div><p data-aap-metrics-summary></p></div></div>
   <section class="aap-panel aap-chart-panel"><span data-aap-updated></span><div data-aap-chart></div><details class="aap-timeseries-disclosure" data-aap-timeseries-disclosure open><summary>日ごとの数字を見る</summary><div data-aap-timeseries-list></div></details></section>
+  <section class="aap-panel aap-conversion-panel" data-aap-conversions hidden><div data-aap-conversion-summary></div><div data-aap-conversion-events></div><div data-aap-conversion-pages></div><p data-aap-conversion-note></p></section>
   <div class="aap-grid"><section class="aap-panel"><div data-aap-sources></div><div data-aap-source-details></div></section><section class="aap-panel"><div data-aap-pages></div></section></div>
-  <section class="aap-panel aap-region-panel"><div data-aap-regions></div><p class="aap-region-note">推定値です</p></section>
+  <div class="aap-grid aap-insight-grid"><section class="aap-panel aap-device-panel"><div data-aap-devices></div></section><section class="aap-panel aap-region-panel"><div data-aap-regions></div><p class="aap-region-note">推定値です</p></section></div>
   <section class="aap-panel aap-search-console" data-aap-search-console data-range="28d">
     <div class="aap-section-heading"><h2>Google検索キーワード <span class="aap-experimental-badge">試験機能</span></h2><span data-aap-search-console-version></span></div>
     <nav class="aap-search-periods"><button data-search-range="7d">7日</button><button data-search-range="28d" class="is-active">28日</button><button data-search-range="3m">3か月</button></nav>
     <div class="aap-search-console-status" data-aap-search-console-status></div><div data-aap-search-console-rows></div><p data-aap-search-console-note></p>
   </section>
-  <section class="aap-panel"><div data-aap-devices></div></section>
   <details data-aap-exclusions><strong data-aap-exclusions-total></strong><div data-aap-exclusion-items></div></details>
 </div>
 <div id="aap_dashboard_widget"><div class="inside">
@@ -197,6 +208,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
       reportEndpoint: '/wp-json/access-analytics-plus/v1/report',
       searchConsoleEndpoint: '/wp-json/access-analytics-plus/v1/search-console/report',
       nonce: 'test',
+      siteUrl: 'https://example.test/',
       today: value,
       strings: { loading: '読み込み中…', error: 'エラー', empty: 'データなし' },
     };
@@ -211,6 +223,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   assert.equal(await report.getAttribute('data-period-mode'), 'day', 'full report defaults to today');
   assert.equal(await report.locator('[data-range="today"]').evaluate((node) => node.classList.contains('is-active')), true, 'today tab is initially active');
   assert.equal(await report.locator('.aap-chart-hit').count(), 24, 'initial report uses hourly data');
+	const popularPageLink = report.locator('[data-aap-pages] a').first();
+	assert.equal(await popularPageLink.getAttribute('href'), 'https://example.test/company/');
+	assert.equal(await popularPageLink.getAttribute('target'), '_blank', 'popular pages open in a new tab');
+	assert.match(await popularPageLink.getAttribute('rel'), /noopener/);
   await searchConsole.getByText('屋根修理 武蔵村山', { exact: true }).waitFor();
   assert.match(await searchConsole.innerText(), /表示\s*80/);
   assert.match(await searchConsole.innerText(), /クリック\s*4/);
@@ -312,12 +328,22 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   assert.equal(await page.locator('.aap-timeseries-heading h3').innerText(), '日別アクセス');
   assert.equal(await page.locator('.aap-timeseries-row').count(), 7);
   assert.ok(await page.locator('.aap-chart-y-label').count() > 0, 'Y-axis labels must be rendered');
+	assert.equal(await report.locator('[data-aap-conversions]').isVisible(), true, 'conversion panel is shown for real reports');
+	assert.match(await report.locator('[data-aap-conversion-summary]').innerText(), /CV訪問\s*2件/);
+	assert.match(await report.locator('[data-aap-conversion-events]').innerText(), /電話クリック\s*CV\s*3回/);
+	assert.doesNotMatch(await report.locator('[data-aap-conversion-events]').innerText(), /LINEクリック/, 'zero-count event rows stay hidden');
+	assert.match(await report.locator('[data-aap-conversion-pages]').innerText(), /お問い合わせ/);
 	assert.equal(await report.locator('[data-aap-sample-badge]').isVisible(), true);
   assert.match(await report.locator('[data-aap-regions]').innerText(), /東京都/);
   assert.match(await report.locator('[data-aap-regions]').innerText(), /5人/);
   assert.match(await report.locator('[data-aap-regions]').innerText(), /その他国内/);
   await report.getByText('すべての都道府県を見る', { exact: true }).click();
   assert.match(await report.locator('[data-aap-regions]').innerText(), /北海道/);
+  assert.equal(await report.locator('.aap-device-donut').count(), 1, 'device distribution renders as one donut chart');
+  assert.match(await report.locator('.aap-device-donut-center').innerText(), /スマートフォン/);
+  assert.match(await report.locator('.aap-device-legend').innerText(), /PC/);
+  assert.ok(await report.locator('.aap-insight-grid .aap-device-panel').count() === 1 && await report.locator('.aap-insight-grid .aap-region-panel').count() === 1, 'device and region panels share the insight grid');
+  assert.ok(await report.locator('.aap-insight-grid').evaluate((node) => node.compareDocumentPosition(document.querySelector('[data-aap-search-console]')) & Node.DOCUMENT_POSITION_FOLLOWING), 'Search Console follows device and region insights');
 
   await report.getByText('今日', { exact: true }).click();
   await page.locator('[data-aap-period-label]').filter({ hasText: '2026年8月27日' }).waitFor();
@@ -426,6 +452,10 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     data.timeseries.forEach((row) => { row.visitors = 0; row.pageviews = 0; });
     data.metrics.visitors = metric(0);
     data.metrics.pageviews = metric(0);
+    data.conversions.items.forEach((item) => { item.value = 0; });
+    data.conversions.conversion_visits = 0;
+    data.conversions.conversion_rate = 0;
+    data.conversions.pages = [];
     if (data.dashboard) data.dashboard.metrics = { visitors: metric(0), pageviews: metric(0) };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
   });
@@ -434,6 +464,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   assert.equal(await widget.locator('svg').count(), 0, 'zero traffic does not render a misleading empty chart');
   await report.locator('.aap-periods [data-range="7d"]').click();
   await report.locator('.aap-chart-empty').waitFor();
+	assert.equal(await report.locator('[data-aap-conversions]').isHidden(), true, 'the complete conversion panel is hidden when every event count is zero');
   assert.equal(await report.locator('[data-aap-timeseries-disclosure] summary').innerText(), '日ごとの数字・時間別への切り替え');
   await report.locator('[data-aap-timeseries-disclosure] summary').click();
   assert.equal(await report.locator('.aap-timeseries-row').count(), 7, 'zero rows remain available in details');

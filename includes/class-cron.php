@@ -6,9 +6,11 @@ namespace AccessAnalyticsPlus;
 
 final class Cron {
 	public const CLEANUP_HOOK = 'aap_daily_cleanup';
+	public const HOURLY_HOOK = 'aap_hourly_maintenance';
 
 	public static function register(): void {
 		add_action( self::CLEANUP_HOOK, array( self::class, 'cleanup' ) );
+		add_action( self::HOURLY_HOOK, array( self::class, 'hourly_maintenance' ) );
 		add_action( 'init', array( self::class, 'ensure_schedule' ) );
 	}
 
@@ -17,18 +19,17 @@ final class Cron {
 	}
 
 	public static function ensure_schedule(): void {
-		$event = wp_get_scheduled_event( self::CLEANUP_HOOK );
-		if ( $event && 'hourly' === $event->schedule ) {
-			return;
-		}
-		if ( $event ) {
-			wp_clear_scheduled_hook( self::CLEANUP_HOOK );
-		}
-		wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::CLEANUP_HOOK );
+		self::ensure_event( self::HOURLY_HOOK, 'hourly', time() + HOUR_IN_SECONDS );
+		self::ensure_event( self::CLEANUP_HOOK, 'daily', time() + DAY_IN_SECONDS );
 	}
 
 	public static function unschedule(): void {
 		wp_clear_scheduled_hook( self::CLEANUP_HOOK );
+		wp_clear_scheduled_hook( self::HOURLY_HOOK );
+	}
+
+	public static function hourly_maintenance(): void {
+		Shadow_Diagnostics::finalize_pending( 5000 );
 	}
 
 	public static function cleanup(): void {
@@ -53,8 +54,7 @@ final class Cron {
 		$threshold_date = $retention_start->format( 'Y-m-d' );
 		$tables    = Database::tables();
 
-		// Finalize unconfirmed staged requests and expire diagnostics independently after seven days.
-		Shadow_Diagnostics::finalize_pending( 5000 );
+		// Expire diagnostics independently after seven days. Pending promotion remains hourly.
 		$shadow_threshold = gmdate( 'Y-m-d H:i:s', time() - ( Shadow_Diagnostics::RETENTION_DAYS * DAY_IN_SECONDS ) );
 		for ( $batch = 0; $batch < 5; ++$batch ) {
 			$deleted = $wpdb->query(
@@ -69,6 +69,18 @@ final class Cron {
 		}
 
 		// Bounded deletes avoid a long lock on larger sites.
+		for ( $batch = 0; $batch < 5; ++$batch ) {
+			$deleted = $wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$tables['events']} WHERE occurred_at < %s LIMIT 5000",
+					$threshold
+				)
+			);
+			if ( 5000 !== $deleted ) {
+				break;
+			}
+		}
+
 		for ( $batch = 0; $batch < 5; ++$batch ) {
 			$deleted = $wpdb->query(
 				$wpdb->prepare(
@@ -102,6 +114,40 @@ final class Cron {
 				)
 			);
 			if ( 5000 !== $deleted ) {
+				break;
+			}
+		}
+
+		self::delete_expired_transients();
+	}
+
+	private static function ensure_event( string $hook, string $schedule, int $start ): void {
+		$event = wp_get_scheduled_event( $hook );
+		if ( $event && $schedule === $event->schedule ) {
+			return;
+		}
+		if ( $event ) {
+			wp_clear_scheduled_hook( $hook );
+		}
+		wp_schedule_event( $start, $schedule, $hook );
+	}
+
+	private static function delete_expired_transients(): void {
+		global $wpdb;
+		$prefix = '_transient_timeout_aap_';
+		$like = $wpdb->esc_like( $prefix ) . '%';
+		for ( $batch = 0; $batch < 5; ++$batch ) {
+			$timeout_names = (array) $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s AND option_value < %d LIMIT 1000",
+					$like,
+					time()
+				)
+			);
+			foreach ( $timeout_names as $timeout_name ) {
+				delete_transient( substr( (string) $timeout_name, strlen( $prefix ) ) );
+			}
+			if ( count( $timeout_names ) < 1000 ) {
 				break;
 			}
 		}

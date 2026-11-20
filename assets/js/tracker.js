@@ -9,6 +9,9 @@
   var VISITOR_STORAGE = 'aap_visitor_id';
   var SESSION_COOKIE = 'aap_sid';
   var SESSION_STORAGE = 'aap_session_state';
+  var trackingToken = '';
+  var eventQueue = [];
+  var eventTrackingStarted = false;
 
   function uuid() {
     if (typeof window.crypto.randomUUID === 'function') {
@@ -99,6 +102,112 @@
       return 'mobile';
     }
     return userAgent ? 'desktop' : 'other';
+  }
+
+  function enabledEvent(name) {
+    return Array.isArray(window.aapTracker.enabledEvents) && window.aapTracker.enabledEvents.indexOf(name) !== -1;
+  }
+
+  function eventLocation(element) {
+    var declared = element && element.closest ? element.closest('[data-aap-location]') : null;
+    var value = declared ? String(declared.getAttribute('data-aap-location') || '') : '';
+    if (/^[a-z0-9_-]{1,64}$/i.test(value)) return value.toLowerCase();
+    if (element && element.closest && element.closest('header')) return 'header';
+    if (element && element.closest && element.closest('footer')) return 'footer';
+    return 'content';
+  }
+
+  function classifyLinkEvent(element) {
+    if (!element) return '';
+    var declared = String(element.getAttribute('data-aap-event') || '').toLowerCase();
+    if (declared && enabledEvent(declared)) return declared;
+    var href = String(element.getAttribute('href') || '').trim();
+    if (/^tel:/i.test(href) && enabledEvent('tel_click')) return 'tel_click';
+    if (/^line:/i.test(href) && enabledEvent('line_click')) return 'line_click';
+    try {
+      var host = new URL(href, window.location.href).hostname.toLowerCase();
+      if ((host === 'line.me' || host === 'lin.ee' || host.endsWith('.line.me')) && enabledEvent('line_click')) return 'line_click';
+    } catch (error) {
+      // Invalid destinations are not tracked.
+    }
+    return '';
+  }
+
+  function transmitEvent(item, useBeacon) {
+    var endpoint = window.aapTracker.eventEndpoint;
+    // A navigation may start while fetch is still pending. In that case a
+    // pagehide beacon is allowed to duplicate the same event UUID; the server
+    // idempotency key guarantees one stored row.
+    if (!trackingToken || !endpoint || item.accepted || (item.inFlight && !useBeacon)) return;
+    var payload = JSON.stringify({
+      token: trackingToken,
+      event_id: item.id,
+      event_name: item.name,
+      event_location: item.location,
+      object_type: item.objectType,
+      object_key: item.objectKey
+    });
+    if (useBeacon && navigator.sendBeacon) {
+      if (navigator.sendBeacon(endpoint, new Blob([payload], { type: 'application/json' }))) return;
+    }
+    item.inFlight = true;
+    window.fetch(endpoint, {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', keepalive: true,
+      headers: { 'Content-Type': 'application/json' }, body: payload
+    }).then(function (response) {
+      if (!response.ok) {
+        var error = new Error('event_http_' + response.status);
+        error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+        throw error;
+      }
+      return response.json().catch(function () { return { accepted: false }; });
+    }).then(function (data) {
+      item.inFlight = false;
+      if (data && data.accepted) item.accepted = true;
+    }).catch(function (error) {
+      item.inFlight = false;
+      if ((error && error.retryable === false) || item.attempts >= 3) return;
+      var delays = [1000, 3000, 8000];
+      var delay = delays[Math.min(item.attempts, delays.length - 1)];
+      item.attempts += 1;
+      window.setTimeout(function () { transmitEvent(item, false); }, delay);
+    });
+  }
+
+  function flushEvents(useBeacon) {
+    eventQueue.forEach(function (item) { transmitEvent(item, useBeacon); });
+    eventQueue = eventQueue.filter(function (item) { return !item.accepted; }).slice(-20);
+  }
+
+  function queueEvent(name, location, objectType, objectKey) {
+    if (!enabledEvent(name)) return;
+    var recent = eventQueue.find(function (item) {
+      return !item.accepted && item.name === name && item.location === location && Date.now() - item.createdAt < 1000;
+    });
+    if (recent) return;
+    eventQueue.push({
+      id: uuid(), name: name, location: location || 'content', objectType: objectType || 'link',
+      objectKey: String(objectKey || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 64),
+      createdAt: Date.now(), attempts: 0, inFlight: false, accepted: false
+    });
+    flushEvents(false);
+  }
+
+  function beginEventTracking() {
+    if (eventTrackingStarted || !window.aapTracker.eventEndpoint) return;
+    eventTrackingStarted = true;
+    document.addEventListener('click', function (event) {
+      var element = event.target && event.target.closest ? event.target.closest('a[href], [data-aap-event]') : null;
+      var name = classifyLinkEvent(element);
+      if (name) queueEvent(name, eventLocation(element), 'link', '');
+    }, true);
+    document.addEventListener('wpcf7mailsent', function (event) {
+      if (!enabledEvent('form_submit')) return;
+      var detail = event && event.detail ? event.detail : {};
+      queueEvent('form_submit', eventLocation(event.target), 'form', String(detail.contactFormId || ''));
+    }, false);
+    window.addEventListener('pagehide', function () { flushEvents(true); });
+    window.addEventListener('pageshow', function () { flushEvents(false); });
   }
 
   function beginEngagement(token) {
@@ -409,8 +518,10 @@
       return response.json();
     }).then(function (data) {
       if (data && data.accepted && data.engagement_token) {
+        trackingToken = data.engagement_token;
         beginEngagement(data.engagement_token);
         beginShadowDiagnostics(data.engagement_token);
+        flushEvents(false);
       }
     }).catch(function (error) {
       var retryable = !error || error.retryable !== false;
@@ -425,5 +536,6 @@
     });
   }
 
+  beginEventTracking();
   send(false);
 })();

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Access Analytics Plus
  * Description:       WordPress管理画面でアクセス状況を簡単に確認できる軽量アクセス解析プラグインです。
- * Version:           0.5.8-beta
+ * Version:           1.0.0
  * Requires at least: 6.8
  * Requires PHP:      8.1
  * Author:            Access Analytics Plus
@@ -21,9 +21,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'AAP_VERSION', '0.5.8-beta' );
-define( 'AAP_BUILD', 'beta.20260913.8' );
-define( 'AAP_DB_VERSION', '9' );
+define( 'AAP_VERSION', '1.0.0' );
+define( 'AAP_BUILD', 'stable.20261121.1' );
+define( 'AAP_DB_VERSION', '10' );
 define( 'AAP_PLUGIN_FILE', __FILE__ );
 define( 'AAP_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'AAP_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -42,6 +42,12 @@ if ( is_readable( $aap_updater_file ) ) {
 			),
 			'plugin'
 		);
+		$aap_include_prereleases = defined( 'AAP_INCLUDE_PRERELEASES' ) && (bool) constant( 'AAP_INCLUDE_PRERELEASES' );
+		/**
+		 * Allows monitor sites to opt in to GitHub pre-release updates.
+		 * Stable installations never receive pre-releases unless explicitly enabled.
+		 */
+		$aap_include_prereleases = (bool) apply_filters( 'aap_include_prereleases', $aap_include_prereleases );
 
 		new \CniWorks\AccessAnalyticsPlus\Updater\GitHub_Release_Updater(
 			array(
@@ -57,7 +63,7 @@ if ( is_readable( $aap_updater_file ) ) {
 				'cache_hours'   => 12,
 				'failure_hours' => 1,
 				'timeout'       => 5,
-				'include_prereleases' => true,
+				'include_prereleases' => $aap_include_prereleases,
 			)
 		);
 	} catch ( \Throwable $aap_updater_error ) {
@@ -76,10 +82,12 @@ require_once AAP_PLUGIN_DIR . 'includes/class-region-resolver.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-shadow-diagnostics.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-settings.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-tracker.php';
+require_once AAP_PLUGIN_DIR . 'includes/class-event-tracker.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-rest-controller.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-sample-data.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-search-console-service.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-analytics.php';
+require_once AAP_PLUGIN_DIR . 'includes/class-hourly-detail.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-ai-report-markdown.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-ai-report.php';
 require_once AAP_PLUGIN_DIR . 'includes/class-ai-report-admin.php';
